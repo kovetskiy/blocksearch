@@ -23,6 +23,7 @@ Usage:
   blocksearch --version
 
 Options:
+  -i <n>          Show lines higher than current indentation level plus <n> (can be negative).
   -f --file       Show filename before the line.
   -l --no-line       Show number of line before the line.
   -h --help       Show this screen.
@@ -42,7 +43,16 @@ func main() {
 		files, withFiles = args["<file>"].([]string)
 		dontShowLine, _  = args["--no-line"].(bool)
 		showFilename, _  = args["--file"].(bool)
+		higherThanArg, _ = args["-i"].(string)
 	)
+
+	var higherThan int
+	if higherThanArg != "" {
+		higherThan, err = strconv.Atoi(higherThanArg)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	if !withFiles {
 		files = []string{"/dev/stdin"}
@@ -61,7 +71,7 @@ func main() {
 				fmt.Println()
 			}
 
-			found, err := queryFile(path, query, showFilename, !dontShowLine)
+			found, err := queryFile(path, query, showFilename, !dontShowLine, higherThan)
 			if err != nil {
 				log.Errorf(err, "%s", path)
 				return
@@ -71,19 +81,22 @@ func main() {
 		}
 
 		if stat.IsDir() {
-			err := filepath.Walk(file, func(path string, info os.FileInfo, _ error) error {
-				if err != nil {
-					return err
-				}
+			err := filepath.Walk(
+				file,
+				func(path string, info os.FileInfo, _ error) error {
+					if err != nil {
+						return err
+					}
 
-				if info.IsDir() {
+					if info.IsDir() {
+						return nil
+					}
+
+					process(path)
+
 					return nil
-				}
-
-				process(path)
-
-				return nil
-			})
+				},
+			)
 			if err != nil {
 				log.Errorf(err, "walk through %s", file)
 			}
@@ -93,7 +106,13 @@ func main() {
 	}
 }
 
-func queryFile(filename string, query string, showFilename bool, showLine bool) (bool, error) {
+func queryFile(
+	filename string,
+	query string,
+	showFilename bool,
+	showLine bool,
+	higherThan int,
+) (bool, error) {
 	contents, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return false, err
@@ -130,7 +149,7 @@ func queryFile(filename string, query string, showFilename bool, showLine bool) 
 			nextLine := lineIndex + 1
 			for ; nextLine < len(lines); nextLine++ {
 				if lines[nextLine] == "" ||
-					getIndentationLevel(lines[nextLine], indent) > lineLevel {
+					getIndentationLevel(lines[nextLine], indent) > lineLevel+higherThan {
 					result = append(
 						result,
 						formatLine(lines[nextLine], nextLine+1),
