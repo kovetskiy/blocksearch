@@ -22,7 +22,21 @@ func (block Block) Format(
 	showFilenameInline bool,
 	filename string,
 	showLine bool,
+	useColors bool,
 ) string {
+	if !useColors {
+		lines := make([]string, len(block))
+		for i := 0; i < len(block); i++ {
+			lines[i] = formatLine(
+				showFilenameInline,
+				filename,
+				showLine,
+				block[i].Line,
+				block[i].Text,
+			)
+		}
+	}
+
 	lines := make([]string, len(block))
 	numbers := make([]int, len(block))
 	for i := 0; i < len(block); i++ {
@@ -59,12 +73,13 @@ func (block Block) Format(
 		min = len(block)
 	}
 	for i := 0; i < min; i++ {
-		if showLine {
-			highlighted[i] = strconv.Itoa(block[i].Line) + ":" + highlighted[i]
-		}
-		if showFilenameInline {
-			highlighted[i] = filename + ":" + highlighted[i]
-		}
+		highlighted[i] = formatLine(
+			showFilenameInline,
+			filename,
+			showLine,
+			block[i].Line,
+			highlighted[i],
+		)
 	}
 
 	return strings.Join(highlighted, "\n")
@@ -75,10 +90,17 @@ type Blocks []Block
 func (blocks Blocks) Format(
 	showFilenameInline bool,
 	filename string,
-	showLine bool) string {
+	showLine bool,
+	useColors bool,
+) string {
 	result := make([]string, len(blocks))
 	for i := 0; i < len(blocks); i++ {
-		result[i] = blocks[i].Format(showFilenameInline, filename, showLine)
+		result[i] = blocks[i].Format(
+			showFilenameInline,
+			filename,
+			showLine,
+			useColors,
+		)
 	}
 
 	return strings.Join(result, "\n\n")
@@ -172,4 +194,20 @@ func getIndentationLevel(line string, indent byte) int {
 
 	// the entire line is just spacing, so no indentation
 	return 0
+}
+
+func formatLine(
+	showFilenameInline bool,
+	filename string,
+	showLine bool,
+	line int,
+	text string,
+) string {
+	if showLine {
+		text = strconv.Itoa(line) + ":" + text
+	}
+	if showFilenameInline {
+		text = filename + ":" + text
+	}
+	return text
 }

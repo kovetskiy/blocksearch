@@ -21,13 +21,13 @@ Usage:
   blocksearch --version
 
 Options:
-  -i <n>          Show lines higher than current indentation level plus <n> (can be negative).
-  -f --file       Show filename before the line.
-  -l --no-line       Show number of line before the line.
-  -h --help       Show this screen.
-  --version       Show version.
+  -i <n>         Show lines higher than current indentation level plus <n> (can be negative).
+  -f --file      Show filename before the line.
+  -l --no-line   Do not show number of line before the line.
+  -c --no-color  Do not use colors for syntax highlighting.
+  -h --help      Show this screen.
+  --version      Show version.
 `
-	//-e --exactly    Do not use regexp, search for exactly specified string instead.
 )
 
 func main() {
@@ -40,6 +40,7 @@ func main() {
 		query                 = args["<query>"].(string)
 		files, withFiles      = args["<file>"].([]string)
 		dontShowLine, _       = args["--no-line"].(bool)
+		dontUseColors, _      = args["--no-colors"].(bool)
 		showFilenameInline, _ = args["--file"].(bool)
 		higherThanArg, _      = args["-i"].(string)
 	)
@@ -81,7 +82,12 @@ func main() {
 				}
 
 				fmt.Println(
-					blocks.Format(showFilenameInline, path, !dontShowLine),
+					blocks.Format(
+						showFilenameInline,
+						path,
+						!dontShowLine,
+						!dontUseColors,
+					),
 				)
 
 				shouldAddLine = true
