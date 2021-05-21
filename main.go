@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 
 	"github.com/reconquest/pkg/log"
@@ -37,13 +38,17 @@ func main() {
 	}
 
 	var (
-		query                 = args["<query>"].(string)
 		files, withFiles      = args["<file>"].([]string)
 		dontShowLine, _       = args["--no-line"].(bool)
 		dontUseColors, _      = args["--no-colors"].(bool)
 		showFilenameInline, _ = args["--file"].(bool)
 		higherThanArg, _      = args["-i"].(string)
 	)
+
+	query, err := regexp.Compile(args["<query>"].(string))
+	if err != nil {
+		log.Fatalf(err, "invalid regexp")
+	}
 
 	var higherThan int
 	if higherThanArg != "" {

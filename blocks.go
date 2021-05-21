@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"io/ioutil"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -108,7 +109,7 @@ func (blocks Blocks) Format(
 
 func findBlocks(
 	filename string,
-	query string,
+	query *regexp.Regexp,
 	higherThan int,
 ) (Blocks, error) {
 	contents, err := ioutil.ReadFile(filename)
@@ -127,7 +128,7 @@ func findBlocks(
 	for lineIndex := 0; lineIndex < len(lines); lineIndex++ {
 		text := lines[lineIndex]
 
-		if strings.Contains(text, query) {
+		if query.Match([]byte(text)) {
 			lineLevel := getIndentationLevel(text, indent)
 
 			block := []BlockLine{
