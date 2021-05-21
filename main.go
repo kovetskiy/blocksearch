@@ -81,7 +81,7 @@ func main() {
 					fmt.Println(path)
 				}
 
-				fmt.Println(
+				fmt.Print(
 					blocks.Format(
 						showFilenameInline,
 						path,

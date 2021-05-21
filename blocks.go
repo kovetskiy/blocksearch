@@ -103,7 +103,7 @@ func (blocks Blocks) Format(
 		)
 	}
 
-	return strings.Join(result, "\n\n")
+	return strings.Join(result, "\n")
 }
 
 func findBlocks(
