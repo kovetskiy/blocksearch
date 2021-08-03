@@ -7,9 +7,12 @@ import (
 	"regexp"
 	"strconv"
 
+	"github.com/kovetskiy/lorg"
 	"github.com/reconquest/pkg/log"
 
 	"github.com/docopt/docopt-go"
+
+	"github.com/mattn/go-isatty"
 )
 
 var (
@@ -27,6 +30,7 @@ Options:
   -l --no-line   Do not show number of line before the line.
   -c --no-color  Do not use colors for syntax highlighting.
   -h --help      Show this screen.
+  -v             Be verbose.
   --version      Show version.
 `
 )
@@ -38,12 +42,17 @@ func main() {
 	}
 
 	var (
-		files, withFiles      = args["<file>"].([]string)
+		files, _              = args["<file>"].([]string)
 		dontShowLine, _       = args["--no-line"].(bool)
 		dontUseColors, _      = args["--no-colors"].(bool)
 		showFilenameInline, _ = args["--file"].(bool)
 		higherThanArg, _      = args["-i"].(string)
 	)
+
+	verbose, _ := args["-v"].(bool)
+	if verbose {
+		log.SetLevel(lorg.LevelDebug)
+	}
 
 	query, err := regexp.Compile(args["<query>"].(string))
 	if err != nil {
@@ -58,12 +67,18 @@ func main() {
 		}
 	}
 
-	if !withFiles {
-		files = []string{"/dev/stdin"}
+	if len(files) == 0 {
+		if isatty.IsTerminal(os.Stdout.Fd()) {
+			files = []string{"."}
+		} else {
+			files = []string{"/dev/stdin"}
+		}
 	}
 
 	shouldAddLine := false
 	for _, file := range files {
+		log.Debug("stat: " + file)
+
 		stat, err := os.Stat(file)
 		if err != nil {
 			log.Errorf(err, "%s", file)
@@ -71,6 +86,8 @@ func main() {
 		}
 
 		process := func(path string) {
+			log.Debug("process: " + path)
+
 			blocks, err := findBlocks(path, query, higherThan)
 			if err != nil {
 				log.Errorf(err, "%s", path)

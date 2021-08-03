@@ -2,13 +2,17 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"io/ioutil"
+	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/alecthomas/chroma/lexers"
 	"github.com/alecthomas/chroma/quick"
+	"github.com/reconquest/karma-go"
 	"github.com/reconquest/pkg/log"
 )
 
@@ -112,9 +116,35 @@ func findBlocks(
 	query *regexp.Regexp,
 	higherThan int,
 ) (Blocks, error) {
-	contents, err := ioutil.ReadFile(filename)
+	file, err := os.Open(filename)
 	if err != nil {
-		return nil, err
+		return nil, karma.Format(err, "open file")
+	}
+
+	defer file.Close()
+
+	header := make([]byte, 256)
+	_, err = file.Read(header)
+	if err != nil && err != io.EOF {
+		return nil, karma.Format(err, "read header")
+	}
+
+	kind := http.DetectContentType(header)
+
+	log.Debug("content type: " + kind)
+
+	if !strings.HasPrefix(kind, "text/plain") {
+		return nil, nil
+	}
+
+	_, err = file.Seek(0, 0)
+	if err != nil {
+		return nil, karma.Format(err, "file seek")
+	}
+
+	contents, err := ioutil.ReadAll(file)
+	if err != nil {
+		return nil, karma.Format(err, "read file")
 	}
 
 	lines := strings.Split(string(contents), "\n")
