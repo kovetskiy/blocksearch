@@ -25,13 +25,15 @@ Usage:
   blocksearch --version
 
 Options:
-  -i <n>         Show lines higher than current indentation level plus <n> (can be negative).
-  -f --file      Show filename before the line.
-  -l --no-line   Do not show number of line before the line.
-  -c --no-color  Do not use colors for syntax highlighting.
-  -h --help      Show this screen.
-  -v             Be verbose.
-  --version      Show version.
+  -i <n>              Show lines higher than current indentation level plus <n> (can be negative).
+  -f --file           Show filename before the line.
+  -l --no-line        Do not show number of line before the line.
+  -c --no-color       Do not use colors for syntax highlighting.
+  -j --json           Output blocks in JSON.
+  -S --stream <path>  Stream and execute the given program. Enforces JSON.
+  -h --help           Show this screen.
+  -v                  Be verbose.
+  --version           Show version.
 `
 )
 
@@ -42,11 +44,13 @@ func main() {
 	}
 
 	var (
-		files, _              = args["<file>"].([]string)
-		dontShowLine, _       = args["--no-line"].(bool)
-		dontUseColors, _      = args["--no-colors"].(bool)
-		showFilenameInline, _ = args["--file"].(bool)
-		higherThanArg, _      = args["-i"].(string)
+		files, _                = args["<file>"].([]string)
+		dontShowLine, _         = args["--no-line"].(bool)
+		dontUseColors, _        = args["--no-colors"].(bool)
+		showFilenameInline, _   = args["--file"].(bool)
+		higherThanArg, _        = args["-i"].(string)
+		useJSON                 = args["--json"].(bool)
+		streamCmd, useStreaming = args["--stream"].(string)
 	)
 
 	verbose, _ := args["-v"].(bool)
@@ -95,24 +99,40 @@ func main() {
 			}
 
 			if len(blocks) > 0 {
-				if shouldAddLine {
-					fmt.Println()
+				if useStreaming {
+					err := blocks.Stream(streamCmd, path)
+					if err != nil {
+						log.Errorf(err, "stream failed")
+						return
+					}
+				} else if useJSON {
+					buffer, err := blocks.EncodeJSON(path)
+					if err != nil {
+						log.Errorf(err, "json encode blocks")
+						return
+					}
+
+					os.Stdout.Write(buffer)
+				} else {
+					if shouldAddLine {
+						fmt.Println()
+					}
+
+					if !showFilenameInline {
+						fmt.Println(path)
+					}
+
+					fmt.Print(
+						blocks.Format(
+							showFilenameInline,
+							path,
+							!dontShowLine,
+							!dontUseColors,
+						),
+					)
+
+					shouldAddLine = true
 				}
-
-				if !showFilenameInline {
-					fmt.Println(path)
-				}
-
-				fmt.Print(
-					blocks.Format(
-						showFilenameInline,
-						path,
-						!dontShowLine,
-						!dontUseColors,
-					),
-				)
-
-				shouldAddLine = true
 			}
 		}
 

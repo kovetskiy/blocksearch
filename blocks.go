@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -22,6 +24,22 @@ type BlockLine struct {
 }
 
 type Block []BlockLine
+
+func (block Block) GetLineStart() int {
+	return block[0].Line
+}
+
+func (block Block) GetLineEnd() int {
+	return block[len(block)-1].Line
+}
+
+func (block Block) JoinLines() string {
+	lines := make([]string, len(block))
+	for i := 0; i < len(block); i++ {
+		lines[i] = block[i].Text
+	}
+	return strings.Join(lines, "\n")
+}
 
 func (block Block) Format(
 	showFilenameInline bool,
@@ -109,6 +127,64 @@ func (blocks Blocks) Format(
 	}
 
 	return strings.Join(result, "\n")
+}
+
+type BlockExport struct {
+	Filename  string `json:"filename"`
+	LineStart int    `json:"line_start"`
+	LineEnd   int    `json:"line_end"`
+	Text      string `json:"text"`
+}
+
+func (blocks *Blocks) EncodeJSON(
+	filename string,
+) ([]byte, error) {
+	buffer := []byte{}
+	for _, block := range *blocks {
+		js, err := block.EncodeJSON(filename)
+		if err != nil {
+			return nil, err
+		}
+
+		buffer = append(buffer, js...)
+		buffer = append(buffer, []byte("\n")...)
+	}
+
+	return buffer, nil
+}
+
+func (blocks *Blocks) Stream(streamCmd string, filename string) error {
+	for _, block := range *blocks {
+		encoded, err := block.EncodeJSON(filename)
+		if err != nil {
+			return err
+		}
+
+		cmd := exec.Command(streamCmd)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = bytes.NewBuffer(encoded)
+
+		err = cmd.Run()
+		if err != nil {
+			if _, ok := err.(*exec.ExitError); !ok {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (block Block) EncodeJSON(filename string) ([]byte, error) {
+	export := BlockExport{
+		Filename:  filename,
+		LineStart: block.GetLineStart(),
+		LineEnd:   block.GetLineEnd(),
+		Text:      block.JoinLines(),
+	}
+
+	return json.Marshal(export)
 }
 
 func findBlocks(
