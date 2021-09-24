@@ -126,7 +126,7 @@ func (blocks Blocks) Format(
 		)
 	}
 
-	return strings.Join(result, "\n")
+	return strings.Join(result, "\n\n")
 }
 
 type BlockExport struct {
