@@ -318,3 +318,25 @@ func formatLine(
 	}
 	return text
 }
+
+func filterBlocks(blocks Blocks, filters []*regexp.Regexp) Blocks {
+	result := Blocks{}
+
+	for _, block := range blocks {
+		found := false
+	nextline:
+		for _, line := range block {
+			for _, filter := range filters {
+				if filter.MatchString(line.Text) {
+					found = true
+					break nextline
+				}
+			}
+		}
+
+		if found {
+			result = append(result, block)
+		}
+	}
+	return result
+}

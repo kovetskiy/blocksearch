@@ -20,20 +20,21 @@ var (
 	usage   = "blocksearch " + version + `
 
 Usage:
-  blocksearch [options] <query> [<file>...]
+  blocksearch [options] <query> [<file>...] [-f <regexp>]...
   blocksearch -h | --help
   blocksearch --version
 
 Options:
-  -i <n>              Show lines higher than current indentation level plus <n> (can be negative).
-  -f --file           Show filename before the line.
-  -l --no-line        Do not show number of line before the line.
-  -c --no-color       Do not use colors for syntax highlighting.
-  -j --json           Output blocks in JSON.
-  -S --stream <path>  Stream and execute the given program. Enforces JSON.
-  -h --help           Show this screen.
-  -v                  Be verbose.
-  --version           Show version.
+  -i <n>                Show lines higher than current indentation level plus <n> (can be negative).
+  -t --file             Show filename before the line.
+  -l --no-line          Do not show number of line before the line.
+  -c --no-color         Do not use colors for syntax highlighting.
+  -j --json             Output blocks in JSON.
+  -S --stream <path>    Stream and execute the given program. Enforces JSON.
+  -f --filter <regexp>  Filter blocks by specified regexp.  
+  -h --help             Show this screen.
+  -v                    Be verbose.
+  --version             Show version.
 `
 )
 
@@ -51,6 +52,7 @@ func main() {
 		higherThanArg, _        = args["-i"].(string)
 		useJSON                 = args["--json"].(bool)
 		streamCmd, useStreaming = args["--stream"].(string)
+		filters                 = compileRegexps(args["--filter"].([]string))
 	)
 
 	verbose, _ := args["-v"].(bool)
@@ -97,6 +99,8 @@ func main() {
 				log.Errorf(err, "%s", path)
 				return
 			}
+
+			blocks = filterBlocks(blocks, filters)
 
 			if len(blocks) > 0 {
 				if useStreaming {
@@ -160,4 +164,17 @@ func main() {
 			process(file)
 		}
 	}
+}
+
+func compileRegexps(raw []string) []*regexp.Regexp {
+	result := []*regexp.Regexp{}
+	for _, query := range raw {
+		re, err := regexp.Compile(query)
+		if err != nil {
+			log.Fatalf(err, "compile: %q", query)
+		}
+
+		result = append(result, re)
+	}
+	return result
 }
