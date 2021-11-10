@@ -320,6 +320,10 @@ func formatLine(
 }
 
 func filterBlocks(blocks Blocks, filters []*regexp.Regexp) Blocks {
+	if len(filters) == 0 {
+		return blocks
+	}
+
 	result := Blocks{}
 
 	for _, block := range blocks {
