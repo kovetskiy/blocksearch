@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/kovetskiy/lorg"
 	"github.com/reconquest/pkg/log"
@@ -20,7 +21,7 @@ var (
 	usage   = "blocksearch " + version + `
 
 Usage:
-  blocksearch [options] <query> [<file>...] [-f <regexp>]...
+  blocksearch [options] <query> [<file>...] [-f <regexp>]... [-x <ext>]...
   blocksearch -h | --help
   blocksearch --version
 
@@ -33,6 +34,7 @@ Options:
   -S --stream <path>    Stream and execute the given program. Enforces JSON.
   -f --filter <regexp>  Filter blocks by specified regexp.  
   -h --help             Show this screen.
+  -x --extension <ext>  Search files only with the specified extensions.
   -v                    Be verbose.
   --version             Show version.
 `
@@ -53,6 +55,9 @@ func main() {
 		useJSON                 = args["--json"].(bool)
 		streamCmd, useStreaming = args["--stream"].(string)
 		filters                 = compileRegexps(args["--filter"].([]string))
+		extensions              = expandExtensions(
+			args["--extension"].([]string),
+		)
 	)
 
 	verbose, _ := args["-v"].(bool)
@@ -92,6 +97,10 @@ func main() {
 		}
 
 		process := func(path string) {
+			if len(extensions) != 0 && !hasExtension(path, extensions) {
+				return
+			}
+
 			log.Debug("process: " + path)
 
 			blocks, err := findBlocks(path, query, higherThan)
@@ -177,4 +186,25 @@ func compileRegexps(raw []string) []*regexp.Regexp {
 		result = append(result, re)
 	}
 	return result
+}
+
+func expandExtensions(args []string) []string {
+	result := []string{}
+	for _, ext := range args {
+		if strings.Contains(ext, ",") {
+			result = append(result, strings.Split(ext, ",")...)
+		} else {
+			result = append(result, ext)
+		}
+	}
+	return result
+}
+
+func hasExtension(path string, extensions []string) bool {
+	for _, ext := range extensions {
+		if strings.HasSuffix(path, "."+ext) {
+			return true
+		}
+	}
+	return false
 }
