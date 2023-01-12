@@ -5,10 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/kovetskiy/lorg"
+	"github.com/monochromegane/go-gitignore"
 	"github.com/reconquest/pkg/log"
 
 	"github.com/docopt/docopt-go"
@@ -29,56 +29,69 @@ Options:
   -i <n>                Show lines higher than current indentation level plus <n> (can be negative).
   -t --file             Show filename before the line.
   -l --no-line          Do not show number of line before the line.
-  -c --no-color         Do not use colors for syntax highlighting.
+  -c --no-colors        Do not use colors for syntax highlighting.
   -j --json             Output blocks in JSON.
   -S --stream <path>    Stream and execute the given program. Enforces JSON.
   -f --filter <regexp>  Filter blocks by specified regexp.  
-  -h --help             Show this screen.
   -x --extension <ext>  Search files only with the specified extensions.
   -v                    Be verbose.
   --version             Show version.
+  -h --help             Show this screen.
 `
 )
 
+type Arguments struct {
+	ValueHigherThan int      `docopt:"-i"`
+	ValuePipeStream string   `docopt:"--stream"`
+	ValueFilters    []string `docopt:"--filter"`
+	ValueExtensions []string `docopt:"--extension"`
+
+	FlagShowFilenamePerLine bool `docopt:"--file"`
+	FlagNoShowLineNumber    bool `docopt:"--no-line"`
+	FlagNoColors            bool `docopt:"--no-colors"`
+	FlagJSON                bool `docopt:"--json"`
+	FlagVerbose             bool `docopt:"-v"`
+
+	ValueQuery string   `docopt:"<query>"`
+	ValueFiles []string `docopt:"<file>"`
+}
+
 func main() {
-	args, err := docopt.Parse(usage, nil, true, version, false)
+	opts, err := docopt.ParseDoc(usage)
+	if err != nil {
+		panic(err)
+	}
+
+	var args Arguments
+	err = opts.Bind(&args)
 	if err != nil {
 		panic(err)
 	}
 
 	var (
-		files, _                = args["<file>"].([]string)
-		dontShowLine, _         = args["--no-line"].(bool)
-		dontUseColors, _        = args["--no-colors"].(bool)
-		showFilenameInline, _   = args["--file"].(bool)
-		higherThanArg, _        = args["-i"].(string)
-		useJSON                 = args["--json"].(bool)
-		streamCmd, useStreaming = args["--stream"].(string)
-		filters                 = compileRegexps(args["--filter"].([]string))
-		extensions              = expandExtensions(
-			args["--extension"].([]string),
-		)
+		filters    = compileRegexps(args.ValueFilters)
+		extensions = expandExtensions(args.ValueExtensions)
 	)
 
-	verbose, _ := args["-v"].(bool)
-	if verbose {
+	if args.FlagVerbose {
 		log.SetLevel(lorg.LevelDebug)
 	}
 
-	query, err := regexp.Compile(args["<query>"].(string))
+	query, err := regexp.Compile(args.ValueQuery)
 	if err != nil {
 		log.Fatalf(err, "invalid regexp")
 	}
 
-	var higherThan int
-	if higherThanArg != "" {
-		higherThan, err = strconv.Atoi(higherThanArg)
-		if err != nil {
-			log.Fatal(err)
-		}
+	ignoreMatcher, err := gitignore.NewGitIgnore(".gitignore")
+	if err != nil && !os.IsNotExist(err) {
+		log.Fatalf(
+			err,
+			"unable to read .gitignore",
+		)
 	}
 
-	if len(files) == 0 {
+	files := args.ValueFiles
+	if len(args.ValueFiles) == 0 {
 		if isatty.IsTerminal(os.Stdout.Fd()) {
 			files = []string{"."}
 		} else {
@@ -97,13 +110,9 @@ func main() {
 		}
 
 		process := func(path string) {
-			if len(extensions) != 0 && !hasExtension(path, extensions) {
-				return
-			}
-
 			log.Debug("process: " + path)
 
-			blocks, err := findBlocks(path, query, higherThan)
+			blocks, err := findBlocks(path, query, args.ValueHigherThan)
 			if err != nil {
 				log.Errorf(err, "%s", path)
 				return
@@ -112,13 +121,13 @@ func main() {
 			blocks = filterBlocks(blocks, filters)
 
 			if len(blocks) > 0 {
-				if useStreaming {
-					err := blocks.Stream(streamCmd, path)
+				if args.ValuePipeStream != "" {
+					err := blocks.Stream(args.ValuePipeStream, path)
 					if err != nil {
 						log.Errorf(err, "stream failed")
 						return
 					}
-				} else if useJSON {
+				} else if args.FlagJSON {
 					buffer, err := blocks.EncodeJSON(path)
 					if err != nil {
 						log.Errorf(err, "json encode blocks")
@@ -131,16 +140,16 @@ func main() {
 						fmt.Println()
 					}
 
-					if !showFilenameInline {
+					if !args.FlagShowFilenamePerLine {
 						fmt.Println(path)
 					}
 
 					fmt.Print(
 						blocks.Format(
-							showFilenameInline,
+							args.FlagShowFilenamePerLine,
 							path,
-							!dontShowLine,
-							!dontUseColors,
+							!args.FlagNoShowLineNumber,
+							!args.FlagNoColors,
 						),
 					)
 
@@ -158,6 +167,19 @@ func main() {
 					}
 
 					if info.IsDir() {
+						if filepath.Base(path) == ".git" {
+							return filepath.SkipDir
+						}
+
+						return nil
+					}
+
+					if len(extensions) != 0 && !hasExtension(path, extensions) {
+						return nil
+					}
+
+					if ignoreMatcher != nil &&
+						ignoreMatcher.Match(path, info.IsDir()) {
 						return nil
 					}
 

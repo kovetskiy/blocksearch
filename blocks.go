@@ -58,6 +58,8 @@ func (block Block) Format(
 				block[i].Text,
 			)
 		}
+
+		return strings.Join(lines, "\n")
 	}
 
 	lines := make([]string, len(block))
