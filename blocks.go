@@ -238,6 +238,14 @@ func findBlocks(
 		return nil, err
 	}
 
+	max := func(a, b int) int {
+		if a > b {
+			return a
+		}
+
+		return b
+	}
+
 	result := []Block{}
 	for lineIndex := 0; lineIndex < len(lines); lineIndex++ {
 		text := lines[lineIndex]
@@ -258,7 +266,7 @@ func findBlocks(
 					getIndentationLevel(
 						lines[nextLine],
 						indent,
-					) > lineLevel+higherThan {
+					) > max(lineLevel+higherThan, 0) {
 					block = append(block, BlockLine{
 						Line: nextLine + 1,
 						Text: lines[nextLine],
