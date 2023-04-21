@@ -92,7 +92,7 @@ func main() {
 
 	files := args.ValueFiles
 	if len(args.ValueFiles) == 0 {
-		if isatty.IsTerminal(os.Stdout.Fd()) {
+		if isatty.IsTerminal(os.Stdin.Fd()) {
 			files = []string{"."}
 		} else {
 			files = []string{"/dev/stdin"}
@@ -140,16 +140,15 @@ func main() {
 						fmt.Println()
 					}
 
-					if !args.FlagShowFilenamePerLine {
-						fmt.Println(path)
-					}
-
-					fmt.Print(
-						blocks.Format(
-							args.FlagShowFilenamePerLine,
-							path,
-							!args.FlagNoShowLineNumber,
-							!args.FlagNoColors,
+					fmt.Println(
+						strings.Join(
+							blocks.Format(
+								args.FlagShowFilenamePerLine,
+								path,
+								!args.FlagNoShowLineNumber,
+								!args.FlagNoColors,
+							),
+							"\n\n",
 						),
 					)
 

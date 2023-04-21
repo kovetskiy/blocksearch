@@ -117,18 +117,24 @@ func (blocks Blocks) Format(
 	filename string,
 	showLine bool,
 	useColors bool,
-) string {
+) []string {
 	result := make([]string, len(blocks))
 	for i := 0; i < len(blocks); i++ {
-		result[i] = blocks[i].Format(
+		block := blocks[i].Format(
 			showFilenameInline,
 			filename,
 			showLine,
 			useColors,
 		)
+
+		if !showFilenameInline {
+			result[i] = filename + "\n" + block
+		} else {
+			result[i] = block
+		}
 	}
 
-	return strings.Join(result, "\n\n")
+	return result
 }
 
 type BlockExport struct {
