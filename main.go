@@ -34,6 +34,7 @@ Options:
   -S --stream <path>    Stream and execute the given program. Enforces JSON.
   -f --filter <regexp>  Filter blocks by specified regexp.  
   -x --extension <ext>  Search files only with the specified extensions.
+  -e --exit-code <code> Exit with the specified code if blocks were found. [default: 0]
   -v                    Be verbose.
   --version             Show version.
   -h --help             Show this screen.
@@ -45,6 +46,7 @@ type Arguments struct {
 	ValuePipeStream string   `docopt:"--stream"`
 	ValueFilters    []string `docopt:"--filter"`
 	ValueExtensions []string `docopt:"--extension"`
+	ValueExitCode   int      `docopt:"--exit-code"`
 
 	FlagShowFilenamePerLine bool `docopt:"--file"`
 	FlagNoShowLineNumber    bool `docopt:"--no-line"`
@@ -99,6 +101,7 @@ func main() {
 		}
 	}
 
+	found := 0
 	shouldAddLine := false
 	for _, file := range files {
 		log.Debug("stat: " + file)
@@ -120,40 +123,43 @@ func main() {
 
 			blocks = filterBlocks(blocks, filters)
 
-			if len(blocks) > 0 {
-				if args.ValuePipeStream != "" {
-					err := blocks.Stream(args.ValuePipeStream, path)
-					if err != nil {
-						log.Errorf(err, "stream failed")
-						return
-					}
-				} else if args.FlagJSON {
-					buffer, err := blocks.EncodeJSON(path)
-					if err != nil {
-						log.Errorf(err, "json encode blocks")
-						return
-					}
+			if len(blocks) == 0 {
+				return
+			}
 
-					os.Stdout.Write(buffer)
-				} else {
-					if shouldAddLine {
-						fmt.Println()
-					}
+			found += len(blocks)
 
-					fmt.Println(
-						strings.Join(
-							blocks.Format(
-								args.FlagShowFilenamePerLine,
-								path,
-								!args.FlagNoShowLineNumber,
-								!args.FlagNoColors,
-							),
-							"\n\n",
-						),
-					)
-
-					shouldAddLine = true
+			switch {
+			case args.ValuePipeStream != "":
+				err := blocks.Stream(args.ValuePipeStream, path)
+				if err != nil {
+					log.Errorf(err, "stream failed")
 				}
+			case args.FlagJSON:
+				buffer, err := blocks.EncodeJSON(path)
+				if err != nil {
+					log.Errorf(err, "json encode blocks")
+				} else {
+					os.Stdout.Write(buffer)
+				}
+			default:
+				if shouldAddLine {
+					fmt.Println()
+				}
+
+				fmt.Println(
+					strings.Join(
+						blocks.Format(
+							args.FlagShowFilenamePerLine,
+							path,
+							!args.FlagNoShowLineNumber,
+							!args.FlagNoColors,
+						),
+						"\n\n",
+					),
+				)
+
+				shouldAddLine = true
 			}
 		}
 
@@ -193,6 +199,10 @@ func main() {
 		} else {
 			process(file)
 		}
+	}
+
+	if found != 0 {
+		os.Exit(args.ValueExitCode)
 	}
 }
 
