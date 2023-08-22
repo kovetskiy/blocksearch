@@ -335,22 +335,33 @@ func formatLine(
 	return text
 }
 
-func filterBlocks(blocks Blocks, filters []*regexp.Regexp) Blocks {
+func filterBlocks(blocks Blocks, filters []*AwkwardMatcher) (Blocks, error) {
 	if len(filters) == 0 {
-		return blocks
+		return blocks, nil
 	}
 
 	result := Blocks{}
 
 	for _, block := range blocks {
+		lines := block.JoinLines()
+
 		found := false
-	nextline:
-		for _, line := range block {
-			for _, filter := range filters {
-				if filter.MatchString(line.Text) {
-					found = true
-					break nextline
-				}
+		for _, filter := range filters {
+			ok, err := filter.Match(lines)
+			if err != nil {
+				return nil, karma.
+					Describe("condition", filter.Condition).
+					Describe("block", lines).
+					Format(
+						err,
+						"match block against condition",
+					)
+
+			}
+
+			if ok {
+				found = true
+				break
 			}
 		}
 
@@ -358,5 +369,5 @@ func filterBlocks(blocks Blocks, filters []*regexp.Regexp) Blocks {
 			result = append(result, block)
 		}
 	}
-	return result
+	return result, nil
 }

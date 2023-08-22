@@ -21,23 +21,23 @@ var (
 	usage   = "blocksearch " + version + `
 
 Usage:
-  blocksearch [options] <query> [<file>...] [-f <regexp>]... [-x <ext>]...
+  blocksearch [options] <query> [<file>...] [-a <if>]... [-x <ext>]...
   blocksearch -h | --help
   blocksearch --version
 
 Options:
-  -i <n>                Show lines higher than current indentation level plus <n> (can be negative).
-  -t --file             Show filename before the line.
-  -l --no-line          Do not show number of line before the line.
-  -c --no-colors        Do not use colors for syntax highlighting.
-  -j --json             Output blocks in JSON.
-  -S --stream <path>    Stream and execute the given program. Enforces JSON.
-  -f --filter <regexp>  Filter blocks by specified regexp.  
-  -x --extension <ext>  Search files only with the specified extensions.
-  -e --exit-code <code> Exit with the specified code if blocks were found. [default: 0]
-  -v                    Be verbose.
-  --version             Show version.
-  -h --help             Show this screen.
+  -i <n>                 Show lines higher than current indentation level plus <n> (can be negative).
+  -t --file              Show filename before the line.
+  -l --no-line           Do not show number of line before the line.
+  -c --no-colors         Do not use colors for syntax highlighting.
+  -j --json              Output blocks in JSON.
+  -S --stream <path>     Stream and execute the given program. Enforces JSON.
+  -a --awk <if>          Filter blocks by specified AWK condition.
+  -x --extension <ext>   Search files only with the specified extensions.
+  -e --exit-code <code>  Exit with the specified code if blocks were found. [default: 0]
+  -v                     Be verbose.
+  --version              Show version.
+  -h --help              Show this screen.
 `
 )
 
@@ -47,6 +47,7 @@ type Arguments struct {
 	ValueFilters    []string `docopt:"--filter"`
 	ValueExtensions []string `docopt:"--extension"`
 	ValueExitCode   int      `docopt:"--exit-code"`
+	ValueAwkIfs     []string `docopt:"--awk"`
 
 	FlagShowFilenamePerLine bool `docopt:"--file"`
 	FlagNoShowLineNumber    bool `docopt:"--no-line"`
@@ -71,7 +72,6 @@ func main() {
 	}
 
 	var (
-		filters    = compileRegexps(args.ValueFilters)
 		extensions = expandExtensions(args.ValueExtensions)
 	)
 
@@ -101,6 +101,14 @@ func main() {
 		}
 	}
 
+	var filters []*AwkwardMatcher
+	for _, filter := range args.ValueAwkIfs {
+		filters = append(
+			filters,
+			NewAwkwardMatcher(filter),
+		)
+	}
+
 	found := 0
 	shouldAddLine := false
 	for _, file := range files {
@@ -121,7 +129,11 @@ func main() {
 				return
 			}
 
-			blocks = filterBlocks(blocks, filters)
+			blocks, err = filterBlocks(blocks, filters)
+			if err != nil {
+				log.Errorf(err, "%s", path)
+				return
+			}
 
 			if len(blocks) == 0 {
 				return
