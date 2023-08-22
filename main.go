@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	version = "[manual build]"
+	version = "2.0"
 	usage   = "blocksearch " + version + `
 
 Usage:
