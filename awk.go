@@ -1,10 +1,11 @@
 package main
 
 import (
-	"os/exec"
+	"bytes"
+	"fmt"
 	"strings"
 
-	"github.com/reconquest/karma-go"
+	"github.com/benhoyt/goawk/interp"
 )
 
 type AwkwardMatcher struct {
@@ -13,29 +14,58 @@ type AwkwardMatcher struct {
 }
 
 func NewAwkwardMatcher(condition string) *AwkwardMatcher {
+	if condition == "" {
+		condition = "1"
+	}
+
 	matcher := &AwkwardMatcher{
 		Condition: condition,
 	}
 
-	matcher.contents = `{if (` + condition + `) { exit 0 } else { exit 3 }}`
+	matcher.contents = `
+	{
+		_line = $0
+		if (_block) {
+			_block = _block "\n" _line
+		} else {
+			_block = _line
+		}
+	}
+	END {
+		_matched = 0
+
+		$0 = _block
+		if (` + condition + `) {
+			_matched = 1
+		}
+
+		if (_matched) {
+			print "TRUE"
+		} else {
+			print "FALSE"
+		}
+	}`
 
 	return matcher
 }
 
 func (matcher *AwkwardMatcher) Match(block string) (bool, error) {
-	cmd := exec.Command("awk", matcher.contents)
+	input := strings.NewReader(block)
+	output := bytes.NewBuffer(nil)
 
-	cmd.Stdin = strings.NewReader(block)
+	err := interp.Exec(matcher.contents, " ", input, output)
+	if err != nil {
+		return false, err
+	}
 
-	output, err := cmd.CombinedOutput()
-	switch {
-	case err == nil:
+	result := strings.TrimSpace(output.String())
+
+	switch result {
+	case "TRUE":
 		return true, nil
-	case err.(*exec.ExitError).ExitCode() == 3:
+	case "FALSE":
 		return false, nil
 	default:
-		return false, karma.
-			Describe("output", string(output)).
-			Format(err, "awk exited with error")
+		return false, fmt.Errorf("unexpected result: %s", result)
 	}
 }
