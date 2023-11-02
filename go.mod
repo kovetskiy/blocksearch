@@ -1,4 +1,4 @@
-module github.com/kovetskiy/blocksearch
+module github.com/kovetskiy/blocksearch/v3
 
 go 1.21.0
 
