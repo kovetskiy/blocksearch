@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	version = "3.0"
+	version = "3.1"
 	usage   = "blocksearch " + version + `
 
 Usage:
@@ -33,8 +33,9 @@ Options:
   -j --json              Output blocks in JSON.
   -S --stream <path>     Stream and execute the given program. Enforces JSON.
   -a --awk <if>          Filter blocks by specified AWK condition.
-  -x --extension <ext>   Search files only with the specified extensions.
   -e --exit-code <code>  Exit with the specified code if blocks were found. [default: 0]
+  --message <warn>       Show the specified message if blocks were found.
+  -x --extension <ext>   Search files only with the specified extensions.
   -v                     Be verbose.
   --version              Show version.
   -h --help              Show this screen.
@@ -48,6 +49,7 @@ type Arguments struct {
 	ValueExtensions []string `docopt:"--extension"`
 	ValueExitCode   int      `docopt:"--exit-code"`
 	ValueAwkIfs     []string `docopt:"--awk"`
+	ValueMessage    string   `docopt:"--message"`
 
 	FlagShowFilenamePerLine bool `docopt:"--file"`
 	FlagNoShowLineNumber    bool `docopt:"--no-line"`
@@ -214,21 +216,12 @@ func main() {
 	}
 
 	if found != 0 {
-		os.Exit(args.ValueExitCode)
-	}
-}
-
-func compileRegexps(raw []string) []*regexp.Regexp {
-	result := []*regexp.Regexp{}
-	for _, query := range raw {
-		re, err := regexp.Compile(query)
-		if err != nil {
-			log.Fatalf(err, "compile: %q", query)
+		if args.ValueMessage != "" {
+			fmt.Println(args.ValueMessage)
 		}
 
-		result = append(result, re)
+		os.Exit(args.ValueExitCode)
 	}
-	return result
 }
 
 func expandExtensions(args []string) []string {
