@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	version = "3.2.0"
+	version = "v1.4.0"
 	usage   = "blocksearch " + version + `
 
 Usage:
