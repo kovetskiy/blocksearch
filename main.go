@@ -190,6 +190,10 @@ func main() {
 							return filepath.SkipDir
 						}
 
+						if ignoreMatcher != nil && ignoreMatcher.Match(path, true) {
+							return filepath.SkipDir
+						}
+
 						return nil
 					}
 
