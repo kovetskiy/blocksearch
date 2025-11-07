@@ -94,6 +94,14 @@ func main() {
 		)
 	}
 
+	globalIgnoreMatcher, err := gitignore.NewGitIgnore(filepath.Join(os.Getenv("HOME"), ".gitignore_global"))
+	if err != nil && !os.IsNotExist(err) {
+		log.Fatalf(
+			err,
+			"unable to read global .gitignore",
+		)
+	}
+
 	files := args.ValueFiles
 	if len(args.ValueFiles) == 0 {
 		if isatty.IsTerminal(os.Stdin.Fd()) {
@@ -194,6 +202,10 @@ func main() {
 							return filepath.SkipDir
 						}
 
+						if globalIgnoreMatcher != nil && globalIgnoreMatcher.Match(path, true) {
+							return filepath.SkipDir
+						}
+
 						return nil
 					}
 
@@ -201,8 +213,11 @@ func main() {
 						return nil
 					}
 
-					if ignoreMatcher != nil &&
-						ignoreMatcher.Match(path, info.IsDir()) {
+					if ignoreMatcher != nil && ignoreMatcher.Match(path, false) {
+						return nil
+					}
+
+					if globalIgnoreMatcher != nil && globalIgnoreMatcher.Match(path, false) {
 						return nil
 					}
 
