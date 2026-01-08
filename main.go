@@ -17,11 +17,12 @@ import (
 )
 
 var (
-	version = "v1.4.0"
+	version = "v1.5.0"
 	usage   = "blocksearch " + version + `
 
 Usage:
   blocksearch [options] <query> [<file>...] [-a <if>]... [-x <ext>]...
+  blocksearch -M [--workdir <dir>]
   blocksearch -h | --help
   blocksearch --version
 
@@ -36,6 +37,8 @@ Options:
   -e --exit-code <code>  Exit with the specified code if blocks were found. [default: 0]
   --message <warn>       Show the specified message if blocks were found.
   -x --extension <ext>   Search files only with the specified extensions.
+  -M --mcp               Start MCP (Model Context Protocol) server on stdio.
+  --workdir <dir>        Working directory for MCP server (default: current directory).
   -v                     Be verbose.
   --version              Show version.
   -h --help              Show this screen.
@@ -50,12 +53,14 @@ type Arguments struct {
 	ValueExitCode   int      `docopt:"--exit-code"`
 	ValueAwkIfs     []string `docopt:"--awk"`
 	ValueMessage    string   `docopt:"--message"`
+	ValueWorkdir    string   `docopt:"--workdir"`
 
 	FlagShowFilenamePerLine bool `docopt:"--file"`
 	FlagNoShowLineNumber    bool `docopt:"--no-line"`
 	FlagNoColors            bool `docopt:"--no-colors"`
 	FlagJSON                bool `docopt:"--json"`
 	FlagVerbose             bool `docopt:"-v"`
+	FlagMCP                 bool `docopt:"--mcp"`
 
 	ValueQuery string   `docopt:"<query>"`
 	ValueFiles []string `docopt:"<file>"`
@@ -73,6 +78,19 @@ func main() {
 		panic(err)
 	}
 
+	// Handle MCP subcommand
+	if args.FlagMCP {
+		mcpServer, err := NewMCPServer(args.ValueWorkdir)
+		if err != nil {
+			log.Fatalf(err, "failed to create MCP server")
+		}
+
+		if err := mcpServer.Run(); err != nil {
+			log.Fatalf(err, "MCP server error")
+		}
+		return
+	}
+
 	var (
 		extensions = expandExtensions(args.ValueExtensions)
 	)
@@ -84,22 +102,6 @@ func main() {
 	query, err := regexp.Compile(args.ValueQuery)
 	if err != nil {
 		log.Fatalf(err, "invalid regexp")
-	}
-
-	ignoreMatcher, err := gitignore.NewGitIgnore(".gitignore")
-	if err != nil && !os.IsNotExist(err) {
-		log.Fatalf(
-			err,
-			"unable to read .gitignore",
-		)
-	}
-
-	globalIgnoreMatcher, err := gitignore.NewGitIgnore(filepath.Join(os.Getenv("HOME"), ".gitignore_global"))
-	if err != nil && !os.IsNotExist(err) {
-		log.Fatalf(
-			err,
-			"unable to read global .gitignore",
-		)
 	}
 
 	files := args.ValueFiles
@@ -119,34 +121,31 @@ func main() {
 		)
 	}
 
+	// Create file walker with current directory as base
+	walker := NewFileWalker(".", extensions)
+
 	found := 0
 	shouldAddLine := false
 	for _, file := range files {
 		log.Debug("stat: " + file)
 
-		stat, err := os.Stat(file)
-		if err != nil {
-			log.Errorf(err, "%s", file)
-			continue
-		}
-
-		process := func(path string) {
+		process := func(path string) error {
 			log.Debug("process: " + path)
 
 			blocks, err := findBlocks(path, query, args.ValueHigherThan)
 			if err != nil {
 				log.Errorf(err, "%s", path)
-				return
+				return nil
 			}
 
 			blocks, err = filterBlocks(blocks, filters)
 			if err != nil {
 				log.Errorf(err, "%s", path)
-				return
+				return nil
 			}
 
 			if len(blocks) == 0 {
-				return
+				return nil
 			}
 
 			found += len(blocks)
@@ -183,54 +182,12 @@ func main() {
 
 				shouldAddLine = true
 			}
+			return nil
 		}
 
-		if stat.IsDir() {
-			err := filepath.Walk(
-				file,
-				func(path string, info os.FileInfo, _ error) error {
-					if err != nil {
-						return err
-					}
-
-					if info.IsDir() {
-						if filepath.Base(path) == ".git" {
-							return filepath.SkipDir
-						}
-
-						if ignoreMatcher != nil && ignoreMatcher.Match(path, true) {
-							return filepath.SkipDir
-						}
-
-						if globalIgnoreMatcher != nil && globalIgnoreMatcher.Match(path, true) {
-							return filepath.SkipDir
-						}
-
-						return nil
-					}
-
-					if len(extensions) != 0 && !hasExtension(path, extensions) {
-						return nil
-					}
-
-					if ignoreMatcher != nil && ignoreMatcher.Match(path, false) {
-						return nil
-					}
-
-					if globalIgnoreMatcher != nil && globalIgnoreMatcher.Match(path, false) {
-						return nil
-					}
-
-					process(path)
-
-					return nil
-				},
-			)
-			if err != nil {
-				log.Errorf(err, "walk through %s", file)
-			}
-		} else {
-			process(file)
+		err := walker.Walk(file, process)
+		if err != nil {
+			log.Errorf(err, "%s", file)
 		}
 	}
 
@@ -262,4 +219,84 @@ func hasExtension(path string, extensions []string) bool {
 		}
 	}
 	return false
+}
+
+// FileWalker handles walking through files respecting gitignore patterns
+type FileWalker struct {
+	ignoreMatcher       gitignore.IgnoreMatcher
+	globalIgnoreMatcher gitignore.IgnoreMatcher
+	extensions          []string
+}
+
+// NewFileWalker creates a new FileWalker with gitignore patterns loaded from the given base directory
+func NewFileWalker(baseDir string, extensions []string) *FileWalker {
+	fw := &FileWalker{
+		extensions: extensions,
+	}
+
+	gitignorePath := filepath.Join(baseDir, ".gitignore")
+	fw.ignoreMatcher, _ = gitignore.NewGitIgnore(gitignorePath)
+
+	globalGitignore := filepath.Join(os.Getenv("HOME"), ".gitignore_global")
+	fw.globalIgnoreMatcher, _ = gitignore.NewGitIgnore(globalGitignore)
+
+	return fw
+}
+
+// Walk iterates through files in the given path, calling processFile for each matching file
+func (fw *FileWalker) Walk(path string, processFile func(path string) error) error {
+	stat, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+
+	if stat.IsDir() {
+		return filepath.Walk(path, func(filePath string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return nil // Skip errors
+			}
+
+			if info.IsDir() {
+				if filepath.Base(filePath) == ".git" {
+					return filepath.SkipDir
+				}
+
+				if fw.ignoreMatcher != nil && fw.ignoreMatcher.Match(filePath, true) {
+					return filepath.SkipDir
+				}
+
+				if fw.globalIgnoreMatcher != nil && fw.globalIgnoreMatcher.Match(filePath, true) {
+					return filepath.SkipDir
+				}
+
+				return nil
+			}
+
+			if len(fw.extensions) != 0 && !hasExtension(filePath, fw.extensions) {
+				return nil
+			}
+
+			if fw.ignoreMatcher != nil && fw.ignoreMatcher.Match(filePath, false) {
+				return nil
+			}
+
+			if fw.globalIgnoreMatcher != nil && fw.globalIgnoreMatcher.Match(filePath, false) {
+				return nil
+			}
+
+			return processFile(filePath)
+		})
+	}
+
+	return processFile(path)
+}
+
+// ListFiles returns a list of all files matching the walker's criteria
+func (fw *FileWalker) ListFiles(path string) ([]string, error) {
+	var files []string
+	err := fw.Walk(path, func(filePath string) error {
+		files = append(files, filePath)
+		return nil
+	})
+	return files, err
 }
