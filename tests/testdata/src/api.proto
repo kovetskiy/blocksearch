@@ -1,0 +1,15 @@
+// Protobuf: searching the message name returns the whole message block.
+syntax = "proto3";
+
+package billing.v1;
+
+message Invoice {
+  string id = 1;
+  int64 amount_cents = 2;
+  bool paid = 3;
+  string currency = 4;
+}
+
+message Receipt {
+  string id = 1;
+}

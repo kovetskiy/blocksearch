@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+
+# @file run_tests
+# @brief Integration test suite for the blocksearch CLI.
+# @description
+#   Wraps reconquest/test-runner.bash to run the blocksearch behavior
+#   testcases under tests/testcases. setup.sh builds the binary once per
+#   session and exports BLOCKSEARCH_BIN; testcases invoke it through
+#   blocksearch:run.
+#
+#   tests.sh resolves setup/teardown/testcases relative to its base dir
+#   (cwd at run time), so paths are given relative to the repo root and
+#   the runner cd's there before handing off.
+#
+#   The vendored harness requires GNU readlink with -f support. Any options
+#   passed on the command line are forwarded verbatim to test-runner.bash
+#   (for example -A, -O <mask>, -v).
+
+set -euo pipefail
+
+_base_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_repo_dir="$(dirname "$_base_dir")"
+
+# setup.sh is copied into a per-session temp dir before sourcing, so it
+# cannot derive the repo path from its own location; hand it over here.
+export BLOCKSEARCH_REPO_DIR="$_repo_dir"
+export TESTDATA_DIR="$_repo_dir/tests/testdata/src"
+
+:require-gnu-readlink() {
+	if readlink -f "${BASH_SOURCE[0]}" >/dev/null 2>&1; then
+		return
+	fi
+
+	printf 'blocksearch tests require GNU readlink with -f support\n' >&2
+	return 1
+}
+
+:cleanup-build() {
+	rm -rf -- "$BLOCKSEARCH_BUILD_DIR"
+}
+
+:main() {
+	:require-gnu-readlink
+	source "$_repo_dir/vendor.bash/github.com/reconquest/import.bash/import.bash"
+	import:use github.com/reconquest/test-runner.bash
+
+	BLOCKSEARCH_BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/blocksearch-tests.XXXXXX")
+	export BLOCKSEARCH_BUILD_DIR
+	trap :cleanup-build EXIT
+
+	test-runner:set-local-setup "tests/setup.sh"
+	test-runner:set-local-teardown "tests/teardown.sh"
+	test-runner:set-testcases-dir "tests/testcases"
+
+	cd "$BLOCKSEARCH_REPO_DIR" || exit 1
+
+	test-runner:run "${@:--A}"
+}
+
+:main "$@"

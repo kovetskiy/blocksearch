@@ -1,0 +1,18 @@
+[submodule "vendor.bash/github.com/reconquest/import.bash"]
+	path = vendor.bash/github.com/reconquest/import.bash
+	url = https://github.com/reconquest/import.bash
+[submodule "vendor.bash/github.com/reconquest/test-runner.bash"]
+	path = vendor.bash/github.com/reconquest/test-runner.bash
+	url = https://github.com/reconquest/test-runner.bash
+[submodule "vendor.bash/github.com/reconquest/tests.sh"]
+	path = vendor.bash/github.com/reconquest/tests.sh
+	url = https://github.com/reconquest/tests.sh
+[submodule "vendor.bash/github.com/reconquest/opts.bash"]
+	path = vendor.bash/github.com/reconquest/opts.bash
+	url = https://github.com/reconquest/opts.bash
+[submodule "vendor.bash/github.com/reconquest/coproc.bash"]
+	path = vendor.bash/github.com/reconquest/coproc.bash
+	url = https://github.com/reconquest/coproc.bash
+[submodule "vendor.bash/github.com/reconquest/types.bash"]
+	path = vendor.bash/github.com/reconquest/types.bash
+	url = https://github.com/reconquest/types.bash

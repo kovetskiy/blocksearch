@@ -1,0 +1,36 @@
+# YAML: indentation defines structure. Spaces only (tabs are illegal).
+# A great stress test: a single space of misindentation changes meaning.
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  tls:
+    enabled: true
+    cert: /etc/ssl/cert.pem
+    key: /etc/ssl/key.pem
+  timeouts:
+    read: 30s
+    write: 30s
+    idle: 120s
+
+database:
+  primary:
+    host: db1.example.com
+    port: 5432
+  replicas:
+    - host: db2.example.com
+      port: 5432
+    - host: db3.example.com
+      port: 5432
+
+logging:
+  level: info
+  outputs:
+    - type: stdout
+    - type: file
+      path: /var/log/app.log
+      rotation:
+        max_size: 100mb
+        max_files: 7
+
+feature_flags: {}

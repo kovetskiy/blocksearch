@@ -1,0 +1,11 @@
+/* CSS: searching a selector returns the whole rule, braces included. */
+
+.invoice-card {
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.receipt {
+  font-family: monospace;
+}

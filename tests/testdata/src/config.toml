@@ -1,0 +1,12 @@
+# TOML: searching the table name returns the whole [table] section.
+[package]
+name = "blocksearch"
+version = "1.0.0"
+
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[server.tls]
+enabled = true
+cert = "/etc/ssl/cert.pem"

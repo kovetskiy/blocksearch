@@ -1,0 +1,14 @@
+// Groovy (Gradle): searching the task name returns the whole task block.
+plugins {
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+task generateBillingSources {
+    doLast {
+        println 'generating billing sources'
+    }
+}

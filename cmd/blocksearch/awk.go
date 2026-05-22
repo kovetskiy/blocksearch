@@ -6,26 +6,27 @@ import (
 	"strings"
 
 	"github.com/benhoyt/goawk/interp"
+	"github.com/benhoyt/goawk/parser"
 )
 
-type AwkwardMatcher struct {
-	Condition string
-	contents  string
+type BlockConditionMatcher struct {
+	Condition  string
+	awkProgram string
 }
 
-func NewAwkwardMatcher(condition string) *AwkwardMatcher {
+func NewBlockConditionMatcher(condition string) *BlockConditionMatcher {
 	if condition == "" {
 		condition = "1"
 	}
 
-	matcher := &AwkwardMatcher{
+	matcher := &BlockConditionMatcher{
 		Condition: condition,
 	}
 
-	matcher.contents = `
+	matcher.awkProgram = `
 	{
 		_line = $0
-		if (_block) {
+		if (_count++) {
 			_block = _block "\n" _line
 		} else {
 			_block = _line
@@ -49,11 +50,11 @@ func NewAwkwardMatcher(condition string) *AwkwardMatcher {
 	return matcher
 }
 
-func (matcher *AwkwardMatcher) Match(block string) (bool, error) {
+func (matcher *BlockConditionMatcher) Match(block string) (bool, error) {
 	input := strings.NewReader(block)
 	output := bytes.NewBuffer(nil)
 
-	err := interp.Exec(matcher.contents, " ", input, output)
+	err := interp.Exec(matcher.awkProgram, " ", input, output)
 	if err != nil {
 		return false, err
 	}
@@ -68,4 +69,12 @@ func (matcher *AwkwardMatcher) Match(block string) (bool, error) {
 	default:
 		return false, fmt.Errorf("unexpected result: %s", result)
 	}
+}
+
+// Validate parses the embedded AWK program so malformed filters fail at
+// search construction (before any block is matched), not lazily when a
+// matched block happens to be evaluated.
+func (matcher *BlockConditionMatcher) Validate() error {
+	_, err := parser.ParseProgram([]byte(matcher.awkProgram), nil)
+	return err
 }
