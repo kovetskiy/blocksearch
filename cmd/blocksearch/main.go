@@ -27,7 +27,7 @@ Options:
   -l --no-line           Do not show number of line before the line.
   --color <when>          When to colorize output: never, always, or auto. [default: auto]
   -j --json              Output blocks in JSON.
-  -H --no-hashline       Suppress hashline edit anchors. In text output, no anchors are prefixed; in JSON, line_hashes is empty. Anchors are on by default.
+  -H --hashline          Prefix lines with hashline edit anchors (LINE#HASH│). In JSON, fills line_hashes. Anchors are off by default.
   -S --stream <cmd>      Run <cmd> via the shell (sh -c) per block, piping its JSON to stdin. Enforces JSON.
   -a --awk <if>          Filter blocks by specified AWK condition.
   -e --exit-code <code>  Exit with the specified code if blocks were found. [default: 0]
@@ -59,7 +59,7 @@ type Arguments struct {
 	FlagNoLine              bool   `docopt:"--no-line"`
 	ValueColor              string `docopt:"--color"`
 	FlagJSON                bool   `docopt:"--json"`
-	FlagNoHashline          bool   `docopt:"--no-hashline"`
+	FlagHashline            bool   `docopt:"--hashline"`
 	FlagVerbose             bool   `docopt:"-v"`
 	FlagFilesOnly           bool   `docopt:"--files"`
 	FlagLiteral             bool   `docopt:"--literal"`
@@ -184,7 +184,7 @@ func outputPolicyFromArgs(args Arguments) (OutputPolicy, error) {
 	}
 
 	showLineNumbers := !args.FlagNoLine
-	hashline := !args.FlagNoHashline && showLineNumbers && !args.FlagShowFilenamePerLine
+	hashline := args.FlagHashline && showLineNumbers && !args.FlagShowFilenamePerLine
 
 	return OutputPolicy{
 		ShowFilename:  args.FlagShowFilenamePerLine,

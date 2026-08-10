@@ -37,22 +37,22 @@ func TestParseArgumentsAfterDoubleDash(t *testing.T) {
 	}
 }
 
-func TestNegativeOutputFlagsKeepRawMeaning(t *testing.T) {
+func TestOutputFlagsKeepRawMeaning(t *testing.T) {
 	defaults := parseArgumentsForTest(t, "query")
-	if defaults.FlagNoLine || defaults.FlagNoHashline {
-		t.Fatalf("negative flags = (%v, %v), want both false by default", defaults.FlagNoLine, defaults.FlagNoHashline)
+	if defaults.FlagNoLine || defaults.FlagHashline {
+		t.Fatalf("output flags = (%v, %v), want both false by default", defaults.FlagNoLine, defaults.FlagHashline)
 	}
 
-	disabled := parseArgumentsForTest(t, "--no-line", "--no-hashline", "query")
-	if !disabled.FlagNoLine || !disabled.FlagNoHashline {
-		t.Fatalf("negative flags = (%v, %v), want both true when present", disabled.FlagNoLine, disabled.FlagNoHashline)
+	given := parseArgumentsForTest(t, "--no-line", "--hashline", "query")
+	if !given.FlagNoLine || !given.FlagHashline {
+		t.Fatalf("output flags = (%v, %v), want both true when present", given.FlagNoLine, given.FlagHashline)
 	}
 }
 
-func TestOutputPolicyNoHashlineDisablesHashline(t *testing.T) {
-	search := buildSearchForTest(t, "--no-hashline", "query", "unused")
-	if search.output.Hashline {
-		t.Fatalf("Hashline = true, want false when --no-hashline is given")
+func TestOutputPolicyHashlineEnablesHashline(t *testing.T) {
+	search := buildSearchForTest(t, "--hashline", "query", "unused")
+	if !search.output.Hashline {
+		t.Fatalf("Hashline = false, want true when --hashline is given")
 	}
 }
 
@@ -192,10 +192,15 @@ func TestOutputFlagsSelectObservableTextFormat(t *testing.T) {
 	}{
 		{name: "no line", flag: "--no-line", want: "fixture.go\nneedle\n"},
 		{name: "filename per line", flag: "--file", want: "fixture.go:7:needle\n"},
-		{name: "no hashline", flag: "--no-hashline", want: "fixture.go\n7:needle\n"},
+		{name: "hashline", flag: "--hashline", want: "fixture.go\n7#AB│needle\n"},
+		{name: "default", flag: "", want: "fixture.go\n7:needle\n"},
 	} {
 		t.Run(testcase.name, func(t *testing.T) {
-			got := emittedTextForArgs(t, testcase.flag, "query", "unused")
+			argv := []string{}
+			if testcase.flag != "" {
+				argv = append(argv, testcase.flag)
+			}
+			got := emittedTextForArgs(t, append(argv, "query", "unused")...)
 			if got != testcase.want {
 				t.Fatalf("output = %q, want %q", got, testcase.want)
 			}
@@ -229,11 +234,10 @@ func TestBuildSearchAcceptsValidAwk(t *testing.T) {
 	}
 }
 
-// Bug: --no-line requested hiding line numbers but hashline output (on by
-// default) still emitted LINE#HASH anchors that include a line number.
-// Passing --no-line selects the classic format, so it must disable hashline.
-func TestOutputPolicyNoLineDisablesHashline(t *testing.T) {
-	search := buildSearchForTest(t, "--no-line", "query", "unused")
+// Hashline anchors carry a line number (LINE#HASH), so --no-line selects
+// the classic format and wins over --hashline.
+func TestOutputPolicyNoLineWinsOverHashline(t *testing.T) {
+	search := buildSearchForTest(t, "--hashline", "--no-line", "query", "unused")
 	if search.output.Hashline {
 		t.Fatalf("Hashline = true, want false when --no-line is given")
 	}
@@ -242,10 +246,10 @@ func TestOutputPolicyNoLineDisablesHashline(t *testing.T) {
 	}
 }
 
-// Bug: --file requested a filename prefix but hashline output ignored it.
-// Passing --file selects the classic format, so it must disable hashline.
-func TestOutputPolicyFileDisablesHashline(t *testing.T) {
-	search := buildSearchForTest(t, "--file", "query", "unused")
+// The classic path:line format cannot carry hashline anchors, so --file
+// wins over --hashline.
+func TestOutputPolicyFileWinsOverHashline(t *testing.T) {
+	search := buildSearchForTest(t, "--hashline", "--file", "query", "unused")
 	if search.output.Hashline {
 		t.Fatalf("Hashline = true, want false when --file is given")
 	}
@@ -254,11 +258,9 @@ func TestOutputPolicyFileDisablesHashline(t *testing.T) {
 	}
 }
 
-// By default hashline anchors are on, so a plain query keeps the hashline
-// format — guarding against the fix over-disabling hashline.
-func TestOutputPolicyDefaultKeepsHashline(t *testing.T) {
+func TestOutputPolicyDefaultDropsHashline(t *testing.T) {
 	search := buildSearchForTest(t, "query", "unused")
-	if !search.output.Hashline {
-		t.Fatalf("Hashline = false, want true by default")
+	if search.output.Hashline {
+		t.Fatalf("Hashline = true, want false by default")
 	}
 }

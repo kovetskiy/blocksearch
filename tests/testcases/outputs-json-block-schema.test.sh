@@ -1,6 +1,6 @@
 # JSON output is exactly one object per block with the documented fields.
 
-tests:eval blocksearch:run --json 'def add' "$TESTDATA_DIR/utils.py"
+tests:eval blocksearch:run --json --hashline 'def add' "$TESTDATA_DIR/utils.py"
 tests:assert-success
 tests:assert-stderr-empty
 

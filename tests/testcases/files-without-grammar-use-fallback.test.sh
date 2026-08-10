@@ -1,6 +1,6 @@
 # Files without a tree-sitter grammar use indentation-based block extraction.
 
-tests:eval blocksearch:run --json 'build:' "$TESTDATA_DIR/Makefile"
+tests:eval blocksearch:run --json --hashline 'build:' "$TESTDATA_DIR/Makefile"
 tests:assert-success
 tests:assert-stderr-empty
 

@@ -2,7 +2,7 @@
 # body and closing brace included (function.go lines 3-5): exactly one
 # block with the full text and no stderr noise.
 
-tests:eval blocksearch:run --json 'func add' "$TESTDATA_DIR/function.go"
+tests:eval blocksearch:run --json --hashline 'func add' "$TESTDATA_DIR/function.go"
 tests:assert-success
 tests:assert-stderr-empty
 
