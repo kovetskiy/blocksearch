@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"strings"
 	"unicode"
 )
@@ -19,19 +20,42 @@ func hashlineHashes(contents []byte) []string {
 	return hashes
 }
 
+type lazyHashlineHashes struct {
+	lines  []string
+	hashes []string
+}
+
+func newLazyHashlineHashes(lines []string) *lazyHashlineHashes {
+	return &lazyHashlineHashes{lines: lines, hashes: make([]string, len(lines))}
+}
+
+func (lazy *lazyHashlineHashes) Hash(index int) string {
+	if lazy.hashes[index] == "" {
+		lazy.hashes[index] = hashlineHashForLine(lazy.lines, index)
+	}
+	return lazy.hashes[index]
+}
+
 func hashlineLines(contents []byte) []string {
 	return strings.Split(hashlineNormalizeFile(contents), "\n")
 }
 
 func hashlineNormalizeFile(contents []byte) string {
+	return string(hashlineNormalizeFileBytes(contents))
+}
+
+func hashlineNormalizeFileBytes(contents []byte) []byte {
 	if len(contents) >= 3 && contents[0] == 0xef && contents[1] == 0xbb && contents[2] == 0xbf {
 		contents = contents[3:]
 	}
 
-	text := string(contents)
-	text = strings.ReplaceAll(text, "\r\n", "\n")
+	if bytes.IndexByte(contents, '\r') < 0 {
+		return contents
+	}
+
+	text := strings.ReplaceAll(string(contents), "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
-	return text
+	return []byte(text)
 }
 
 func hashlineHashForLine(lines []string, index int) string {

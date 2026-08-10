@@ -24,9 +24,9 @@ type blockLineRange struct {
 // subsequent line whose leading whitespace width exceeds the match line's.
 // Blank/whitespace-only lines terminate the block.
 func fallbackBlocks(contents []byte, query *regexp.Regexp) (Blocks, error) {
-	normalized := []byte(hashlineNormalizeFile(contents))
+	normalized := hashlineNormalizeFileBytes(contents)
 	lines := strings.Split(string(normalized), "\n")
-	hashes := hashlineHashes(contents)
+	hashes := newLazyHashlineHashes(lines)
 
 	var blocks Blocks
 	emitted := map[blockLineRange]struct{}{}
@@ -54,7 +54,7 @@ func fallbackBlocks(contents []byte, query *regexp.Regexp) (Blocks, error) {
 		for i := matchLine; i <= endLine; i++ {
 			block = append(block, BlockLine{
 				Line: i + 1,
-				Hash: hashes[i],
+				Hash: hashes.Hash(i),
 				Text: lines[i],
 			})
 		}
@@ -140,11 +140,17 @@ func parseBlocks(
 	language *sitter.Language,
 	query *regexp.Regexp,
 ) (Blocks, error) {
+	normalizedContents := hashlineNormalizeFileBytes(contents)
+
+	matches := query.FindAllIndex(normalizedContents, -1)
+	if len(matches) == 0 {
+		return nil, nil
+	}
+
 	parser := sitter.NewParser()
 	defer parser.Close()
 	parser.SetLanguage(language)
 
-	normalizedContents := []byte(hashlineNormalizeFile(contents))
 	tree := parser.Parse(nil, normalizedContents)
 	if tree == nil {
 		return nil, fmt.Errorf("parse source")
@@ -152,12 +158,12 @@ func parseBlocks(
 	defer tree.Close()
 
 	lines := strings.Split(string(normalizedContents), "\n")
-	hashes := hashlineHashes(contents)
+	hashes := newLazyHashlineHashes(lines)
 	root := tree.RootNode()
 
 	var blocks Blocks
 	emitted := map[blockLineRange]struct{}{}
-	for _, match := range query.FindAllIndex(normalizedContents, -1) {
+	for _, match := range matches {
 		start := uint32(match[0])
 		end := uint32(match[1])
 
@@ -197,13 +203,32 @@ func namedDescendantForByteRange(
 	start uint32,
 	end uint32,
 ) *sitter.Node {
+	if start == end {
+		return namedDescendantForByteRangeLinear(node, start, end)
+	}
+
+	var named *sitter.Node
+	for node != nil && !node.IsNull() && nodeCoversByteRange(node, start, end) {
+		if node.IsNamed() {
+			named = node
+		}
+		node = childCoveringByteRange(node, start, end)
+	}
+	return named
+}
+
+func namedDescendantForByteRangeLinear(
+	node *sitter.Node,
+	start uint32,
+	end uint32,
+) *sitter.Node {
 	if node == nil || node.IsNull() || !nodeCoversByteRange(node, start, end) {
 		return nil
 	}
 
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
-		if descendant := namedDescendantForByteRange(child, start, end); descendant != nil {
+		if descendant := namedDescendantForByteRangeLinear(child, start, end); descendant != nil {
 			return descendant
 		}
 	}
@@ -213,6 +238,31 @@ func namedDescendantForByteRange(
 	}
 
 	return node
+}
+
+func childCoveringByteRange(
+	node *sitter.Node,
+	start uint32,
+	end uint32,
+) *sitter.Node {
+	count := int(node.ChildCount())
+	lo, hi := 0, count
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if node.Child(mid).StartByte() <= start {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	if lo == 0 {
+		return nil
+	}
+	child := node.Child(lo - 1)
+	if nodeCoversByteRange(child, start, end) {
+		return child
+	}
+	return nil
 }
 
 func nodeCoversByteRange(node *sitter.Node, start uint32, end uint32) bool {
@@ -312,7 +362,7 @@ func isStatementContainer(node *sitter.Node) bool {
 func nodeCoversNode(outer, inner *sitter.Node) bool {
 	return outer.StartByte() <= inner.StartByte() && inner.EndByte() <= outer.EndByte()
 }
-func blockFromNode(node *sitter.Node, lines []string, hashes []string) Block {
+func blockFromNode(node *sitter.Node, lines []string, hashes *lazyHashlineHashes) Block {
 	startLine := int(node.StartPoint().Row)
 	endLine := int(node.EndPoint().Row)
 	// tree-sitter positions a node ending in a trailing newline at column 0 of
@@ -332,7 +382,7 @@ func blockFromNode(node *sitter.Node, lines []string, hashes []string) Block {
 	for lineIndex := startLine; lineIndex <= endLine; lineIndex++ {
 		block = append(block, BlockLine{
 			Line: lineIndex + 1,
-			Hash: hashes[lineIndex],
+			Hash: hashes.Hash(lineIndex),
 			Text: lines[lineIndex],
 		})
 	}
