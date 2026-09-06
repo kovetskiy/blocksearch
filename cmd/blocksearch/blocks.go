@@ -2,22 +2,31 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"os"
-	"os/exec"
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/alecthomas/chroma/lexers"
 	"github.com/alecthomas/chroma/quick"
-	"github.com/reconquest/karma-go"
 	"github.com/reconquest/pkg/log"
 )
 
+type Match struct {
+	ByteStart   int `json:"byte_start"`
+	ByteEnd     int `json:"byte_end"`
+	LineStart   int `json:"line_start"`
+	LineEnd     int `json:"line_end"`
+	ColumnStart int `json:"column_start"`
+	ColumnEnd   int `json:"column_end"`
+}
+
 type BlockLine struct {
-	Line int
-	Hash string
-	Text string
+	Line    int
+	Hash    string
+	Text    string
+	Matches []Match `json:"matches,omitempty"`
 }
 
 type Block []BlockLine
@@ -127,6 +136,7 @@ type BlockExport struct {
 	LineEnd    int      `json:"line_end"`
 	Text       string   `json:"text"`
 	LineHashes []string `json:"line_hashes,omitempty"`
+	Matches    []Match  `json:"matches,omitempty"`
 }
 
 func (blocks Blocks) EncodeJSON(filename string, hashline bool) ([]byte, error) {
@@ -145,25 +155,13 @@ func (blocks Blocks) EncodeJSON(filename string, hashline bool) ([]byte, error) 
 }
 
 func (blocks Blocks) Stream(streamCommand string, filename string, hashline bool) error {
-	for _, block := range blocks {
-		encoded, err := block.EncodeJSON(filename, hashline)
-		if err != nil {
-			return err
-		}
-
-		cmd := exec.Command("sh", "-c", streamCommand)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = bytes.NewBuffer(encoded)
-
-		if err := cmd.Run(); err != nil {
-			return karma.
-				Describe("command", streamCommand).
-				Describe("block", filename).
-				Format(err, "stream block to consumer")
-		}
+	if streamCommand == "" {
+		return fmt.Errorf("stream command must not be empty")
 	}
-
+	emitter := newBlockEmitter(OutputPolicy{StreamCommand: streamCommand, Hashline: hashline})
+	if err := emitter.emit(blocks, filename); err != nil {
+		return fmt.Errorf("stream block to consumer %q: %w", filename, err)
+	}
 	return nil
 }
 
@@ -179,6 +177,7 @@ func (block Block) EncodeJSON(filename string, hashline bool) ([]byte, error) {
 		LineEnd:    block.LineEnd(),
 		Text:       block.JoinLines(),
 		LineHashes: lineHashes,
+		Matches:    block[0].Matches,
 	}
 
 	return json.Marshal(export)
@@ -225,38 +224,5 @@ func paddedLineNumber(line int, width int) string {
 }
 
 func filterBlocks(blocks Blocks, filters []*BlockConditionMatcher) (Blocks, error) {
-	if len(filters) == 0 {
-		return blocks, nil
-	}
-
-	result := Blocks{}
-
-	for _, block := range blocks {
-		lines := block.JoinLines()
-
-		found := false
-		for _, filter := range filters {
-			ok, err := filter.Match(lines)
-			if err != nil {
-				return nil, karma.
-					Describe("condition", filter.Condition).
-					Describe("block", lines).
-					Format(
-						err,
-						"match block against condition",
-					)
-
-			}
-
-			if ok {
-				found = true
-				break
-			}
-		}
-
-		if found {
-			result = append(result, block)
-		}
-	}
-	return result, nil
+	return filterSearchBlocks(context.Background(), blocks, filters)
 }

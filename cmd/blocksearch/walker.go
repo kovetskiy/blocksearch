@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,6 +48,13 @@ func (fw *FileWalker) SetGlobalIgnore(matcher gitignore.IgnoreMatcher) {
 }
 
 func (fw *FileWalker) Walk(path string, processFile func(path string) error) error {
+	return fw.WalkContext(context.Background(), path, processFile)
+}
+
+func (fw *FileWalker) WalkContext(ctx context.Context, path string, processFile func(path string) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	fw.root = path
 	stat, err := os.Lstat(path)
 	if err != nil {
@@ -63,17 +71,17 @@ func (fw *FileWalker) Walk(path string, processFile func(path string) error) err
 			return err
 		}
 		if !targetStat.IsDir() {
-			return fw.processFileIfAllowed(path, fw.baseMatchers(), processFile)
+			return fw.processFileIfAllowed(ctx, path, fw.baseMatchers(), processFile)
 		}
 
-		return fw.walkDir(path, processFile, map[string]struct{}{}, fw.baseMatchers())
+		return fw.walkDir(ctx, path, processFile, map[string]struct{}{}, fw.baseMatchers())
 	}
 
 	if stat.IsDir() {
-		return fw.walkDir(path, processFile, map[string]struct{}{}, fw.baseMatchers())
+		return fw.walkDir(ctx, path, processFile, map[string]struct{}{}, fw.baseMatchers())
 	}
 
-	return fw.processFileIfAllowed(path, fw.baseMatchers(), processFile)
+	return fw.processFileIfAllowed(ctx, path, fw.baseMatchers(), processFile)
 }
 
 // processFileIfAllowed applies include/exclude/gitignore rules to a single
@@ -82,10 +90,14 @@ func (fw *FileWalker) Walk(path string, processFile func(path string) error) err
 // matchers is the chain of ignore files accumulated from the root down to
 // this file's directory.
 func (fw *FileWalker) processFileIfAllowed(
+	ctx context.Context,
 	path string,
 	matchers []gitignore.IgnoreMatcher,
 	processFile func(path string) error,
 ) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if !fw.shouldProcessFile(path, matchers) {
 		return nil
 	}
@@ -121,11 +133,15 @@ func loadDirIgnore(dir string) (gitignore.IgnoreMatcher, bool) {
 // ancestors' .gitignore files); its own .gitignore is loaded and appended
 // to the chain before visiting children, mirroring git's semantics.
 func (fw *FileWalker) walkDir(
+	ctx context.Context,
 	path string,
 	processFile func(path string) error,
 	visited map[string]struct{},
 	matchers []gitignore.IgnoreMatcher,
 ) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if fw.shouldSkipDir(path, matchers) {
 		return nil
 	}
@@ -152,7 +168,7 @@ func (fw *FileWalker) walkDir(
 	}
 
 	for _, entry := range entries {
-		if err := fw.walkEntry(path, entry, processFile, visited, matchers); err != nil {
+		if err := fw.walkEntry(ctx, path, entry, processFile, visited, matchers); err != nil {
 			return err
 		}
 	}
@@ -161,12 +177,16 @@ func (fw *FileWalker) walkDir(
 }
 
 func (fw *FileWalker) walkEntry(
+	ctx context.Context,
 	dir string,
 	entry os.DirEntry,
 	processFile func(path string) error,
 	visited map[string]struct{},
 	matchers []gitignore.IgnoreMatcher,
 ) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	path := filepath.Join(dir, entry.Name())
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -179,15 +199,15 @@ func (fw *FileWalker) walkEntry(
 			return nil
 		}
 		if targetInfo.IsDir() {
-			return fw.walkDir(path, processFile, visited, matchers)
+			return fw.walkDir(ctx, path, processFile, visited, matchers)
 		}
 	}
 
 	if info.IsDir() {
-		return fw.walkDir(path, processFile, visited, matchers)
+		return fw.walkDir(ctx, path, processFile, visited, matchers)
 	}
 
-	return fw.processFileIfAllowed(path, matchers, processFile)
+	return fw.processFileIfAllowed(ctx, path, matchers, processFile)
 }
 
 func (fw *FileWalker) shouldSkipDir(path string, matchers []gitignore.IgnoreMatcher) bool {

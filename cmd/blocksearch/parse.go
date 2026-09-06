@@ -1,13 +1,11 @@
 package main
 
 import (
-	"fmt"
+	"context"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 
-	"github.com/reconquest/karma-go"
 	"github.com/reconquest/pkg/log"
 	sitter "github.com/smacker/go-tree-sitter"
 )
@@ -19,65 +17,8 @@ type blockLineRange struct {
 	end   int
 }
 
-// fallbackBlocks extracts blocks using indentation heuristics when no
-// tree-sitter grammar is available. A block is the matched line plus every
-// subsequent line whose leading whitespace width exceeds the match line's.
-// Blank/whitespace-only lines terminate the block.
 func fallbackBlocks(contents []byte, query *regexp.Regexp) (Blocks, error) {
-	normalized := hashlineNormalizeFileBytes(contents)
-	lines := strings.Split(string(normalized), "\n")
-	hashes := newLazyHashlineHashes(lines)
-
-	var blocks Blocks
-	emitted := map[blockLineRange]struct{}{}
-
-	for _, match := range query.FindAllIndex(normalized, -1) {
-		matchLine := byteOffsetToLine(normalized, match[0])
-		if matchLine >= len(lines) {
-			continue
-		}
-
-		baseIndent := leadingWhitespaceWidth(lines[matchLine])
-
-		endLine := matchLine
-		for i := matchLine + 1; i < len(lines); i++ {
-			if isBlankLine(lines[i]) {
-				break
-			}
-			if leadingWhitespaceWidth(lines[i]) <= baseIndent {
-				break
-			}
-			endLine = i
-		}
-
-		block := make(Block, 0, endLine-matchLine+1)
-		for i := matchLine; i <= endLine; i++ {
-			block = append(block, BlockLine{
-				Line: i + 1,
-				Hash: hashes.Hash(i),
-				Text: lines[i],
-			})
-		}
-
-		key := blockLineRange{block.LineStart(), block.LineEnd()}
-		if _, ok := emitted[key]; ok {
-			continue
-		}
-		emitted[key] = struct{}{}
-		blocks = append(blocks, block)
-	}
-
-	return blocks, nil
-}
-
-func byteOffsetToLine(data []byte, offset int) int {
-	line := 0
-	for i := 0; i < offset && i < len(data); i++ {
-		if data[i] == '\n' {
-			line++
-		}
-	}
-	return line
+	return parseBlocksWithOptions(context.Background(), contents, nil, query, ParseOptions{})
 }
 
 func leadingWhitespaceWidth(line string) int {
@@ -99,26 +40,7 @@ func isBlankLine(line string) bool {
 }
 
 func findBlocks(filename string, query *regexp.Regexp) (Blocks, error) {
-	contents, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, karma.Format(err, "read file")
-	}
-
-	if !isTextContent(contents) {
-		return nil, nil
-	}
-
-	language := detectLanguage(filename, contents)
-	if language == nil {
-		return fallbackBlocks(contents, query)
-	}
-
-	blocks, err := parseBlocks(contents, language, query)
-	if err != nil {
-		return nil, karma.Format(err, "parse blocks")
-	}
-
-	return blocks, nil
+	return findBlocksWithOptions(context.Background(), filename, query, ParseOptions{})
 }
 
 func isTextContent(contents []byte) bool {
@@ -140,62 +62,7 @@ func parseBlocks(
 	language *sitter.Language,
 	query *regexp.Regexp,
 ) (Blocks, error) {
-	normalizedContents := hashlineNormalizeFileBytes(contents)
-
-	matches := query.FindAllIndex(normalizedContents, -1)
-	if len(matches) == 0 {
-		return nil, nil
-	}
-
-	parser := sitter.NewParser()
-	defer parser.Close()
-	parser.SetLanguage(language)
-
-	tree := parser.Parse(nil, normalizedContents)
-	if tree == nil {
-		return nil, fmt.Errorf("parse source")
-	}
-	defer tree.Close()
-
-	lines := strings.Split(string(normalizedContents), "\n")
-	hashes := newLazyHashlineHashes(lines)
-	root := tree.RootNode()
-
-	var blocks Blocks
-	emitted := map[blockLineRange]struct{}{}
-	for _, match := range matches {
-		start := uint32(match[0])
-		end := uint32(match[1])
-
-		node := namedDescendantForByteRange(root, start, end)
-		if node == nil || node.IsNull() {
-			continue
-		}
-
-		node = blockNodeForMatch(node)
-		block := blockFromNode(node, lines, hashes)
-		if len(block) == 0 {
-			continue
-		}
-
-		// A block is the range of lines its node spans, so the dedup
-		// key is that line range, not the node's byte range: several
-		// matches on one line resolve to distinct identifier nodes
-		// with different byte ranges but identical line spans, and
-		// emitting each would repeat the same block. Distinct nodes
-		// that span different lines — such as a function name and a
-		// separate statement in its body — keep different keys and
-		// are both kept.
-		key := blockLineRange{block.LineStart(), block.LineEnd()}
-		if _, ok := emitted[key]; ok {
-			continue
-		}
-
-		emitted[key] = struct{}{}
-		blocks = append(blocks, block)
-	}
-
-	return blocks, nil
+	return parseBlocksWithOptions(context.Background(), contents, language, query, ParseOptions{})
 }
 
 func namedDescendantForByteRange(
@@ -362,7 +229,7 @@ func isStatementContainer(node *sitter.Node) bool {
 func nodeCoversNode(outer, inner *sitter.Node) bool {
 	return outer.StartByte() <= inner.StartByte() && inner.EndByte() <= outer.EndByte()
 }
-func blockFromNode(node *sitter.Node, lines []string, hashes *lazyHashlineHashes) Block {
+func blockRangeFromNode(node *sitter.Node, lineCount int) (blockLineRange, bool) {
 	startLine := int(node.StartPoint().Row)
 	endLine := int(node.EndPoint().Row)
 	// tree-sitter positions a node ending in a trailing newline at column 0 of
@@ -370,22 +237,23 @@ func blockFromNode(node *sitter.Node, lines []string, hashes *lazyHashlineHashes
 	if node.EndPoint().Column == 0 && endLine > startLine {
 		endLine--
 	}
+	if startLine >= lineCount {
+		return blockLineRange{}, false
+	}
+	if endLine >= lineCount {
+		endLine = lineCount - 1
+	}
+	return blockLineRange{startLine + 1, endLine + 1}, endLine >= startLine
+}
 
-	if startLine >= len(lines) {
+func blockFromNode(node *sitter.Node, lines []string, hashes *lazyHashlineHashes) Block {
+	span, ok := blockRangeFromNode(node, len(lines))
+	if !ok {
 		return nil
 	}
-	if endLine >= len(lines) {
-		endLine = len(lines) - 1
+	block := make(Block, 0, span.end-span.start+1)
+	for line := span.start; line <= span.end; line++ {
+		block = append(block, BlockLine{Line: line, Hash: hashes.Hash(line - 1), Text: lines[line-1]})
 	}
-
-	block := make(Block, 0, endLine-startLine+1)
-	for lineIndex := startLine; lineIndex <= endLine; lineIndex++ {
-		block = append(block, BlockLine{
-			Line: lineIndex + 1,
-			Hash: hashes.Hash(lineIndex),
-			Text: lines[lineIndex],
-		})
-	}
-
 	return block
 }

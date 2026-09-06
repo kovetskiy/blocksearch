@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
+	"syscall"
 
 	"github.com/docopt/docopt-go"
 	"github.com/kovetskiy/lorg"
@@ -14,7 +17,7 @@ import (
 )
 
 var (
-	version = "v1.5.0"
+	version = "v7.0"
 	usage   = "blocksearch " + version + `
 
 Usage:
@@ -26,7 +29,18 @@ Options:
   -t --file              Show filename before the line.
   -l --no-line           Do not show number of line before the line.
   --color <when>          When to colorize output: never, always, or auto. [default: auto]
-  -j --json              Output blocks in JSON.
+  -j --json              Output blocks as incremental NDJSON; with --files, filename objects.
+  --matches              Include causal match byte offsets and coordinates; implies --json.
+  --overlap <policy>     Keep all, outermost, or innermost line ranges. [default: all]
+  -0 --null              NUL-delimit --files output; incompatible with --json.
+  --stream-persistent <cmd>  Run one shell command (sh -c), feeding NDJSON for the search.
+  --max-file-bytes <n>   Limit raw input bytes per file (0 is unlimited). [default: 0]
+  --max-block-lines <n>  Limit lines per block before filtering. [default: 0]
+  --max-block-bytes <n>  Limit normalized text bytes per block. [default: 0]
+  --max-matches <n>      Limit regex matches per file before deduplication. [default: 0]
+  --max-blocks <n>       Limit deduplicated blocks per file before filtering. [default: 0]
+  --max-output-bytes <n>  Limit bytes emitted or fed to consumers in total. [default: 0]
+  --diagnostics <format>  Stderr diagnostics: text, or JSON with a completion record. [default: text]
   -H --hashline          Prefix lines with hashline edit anchors (LINE#HASH│). In JSON, fills line_hashes. Anchors are off by default.
   -S --stream <cmd>      Run <cmd> via the shell (sh -c) per block, piping its JSON to stdin. Enforces JSON.
   -a --awk <if>          Filter blocks by specified AWK condition.
@@ -44,16 +58,35 @@ Each <file> may be an existing file, an existing directory (searched
 recursively), or a glob (e.g. *.go, src/**/*.go, {a,b}.py). With no
 <file>, blocksearch searches . when stdin is a terminal and /dev/stdin
 otherwise. A glob that matches nothing is an error.
+
+--files cannot be combined with streaming or --matches; --null requires
+--files. The stream modes are mutually exclusive and take precedence over
+--json. --no-line or --file disables --hashline. Overlap selection precedes
+AWK filtering; retained blocks stay in first-match order within walk order.
+Failures may leave partial stdout. --diagnostics=json ends stderr with a
+completion record (success and results_partial). See docs/machine-interface.md
+for match normalization, resource scope, and diagnostic schemas.
 `
 )
 
 type Arguments struct {
-	ValueStreamCommand string   `docopt:"--stream"`
-	ValueIncludes      []string `docopt:"--include"`
-	ValueExcludes      []string `docopt:"--exclude"`
-	ValueExitCode      int      `docopt:"--exit-code"`
-	ValueAwkIfs        []string `docopt:"--awk"`
-	ValueMessage       string   `docopt:"--message"`
+	FlagMatches                  bool     `docopt:"--matches"`
+	FlagNull                     bool     `docopt:"--null"`
+	ValueOverlap                 string   `docopt:"--overlap"`
+	ValuePersistentStreamCommand string   `docopt:"--stream-persistent"`
+	ValueMaxFileBytes            int64    `docopt:"--max-file-bytes"`
+	ValueMaxBlockLines           int      `docopt:"--max-block-lines"`
+	ValueMaxBlockBytes           int64    `docopt:"--max-block-bytes"`
+	ValueMaxMatches              int      `docopt:"--max-matches"`
+	ValueMaxBlocks               int      `docopt:"--max-blocks"`
+	ValueMaxOutputBytes          int64    `docopt:"--max-output-bytes"`
+	ValueDiagnostics             string   `docopt:"--diagnostics"`
+	ValueStreamCommand           string   `docopt:"--stream"`
+	ValueIncludes                []string `docopt:"--include"`
+	ValueExcludes                []string `docopt:"--exclude"`
+	ValueExitCode                int      `docopt:"--exit-code"`
+	ValueAwkIfs                  []string `docopt:"--awk"`
+	ValueMessage                 string   `docopt:"--message"`
 
 	FlagShowFilenamePerLine bool   `docopt:"--file"`
 	FlagNoLine              bool   `docopt:"--no-line"`
@@ -73,39 +106,65 @@ type Arguments struct {
 }
 
 func main() {
-	args, err := parseArguments()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "blocksearch: invalid arguments: %s\n", err)
-		os.Exit(2)
-	}
+	signal.Ignore(syscall.SIGPIPE)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	exitCode := runCLI(ctx, os.Args[1:])
+	stop()
+	os.Exit(exitCode)
+}
 
-	if args.FlagVerbose {
+func runCLI(ctx context.Context, argv []string) int {
+	args, err := parseArgumentsArgs(argv)
+	jsonDiagnostics := requestsJSONDiagnostics(argv)
+	if err != nil {
+		reportCompletion(os.Stderr, jsonDiagnostics, diagnosticError("argument", "", "", err), 2)
+		return 2
+	}
+	jsonDiagnostics = args.ValueDiagnostics == "json"
+	if args.FlagVerbose && !jsonDiagnostics {
 		log.SetLevel(lorg.LevelDebug)
 	}
 
 	search, err := buildSearch(args)
 	if err != nil {
-		log.Fatalf(err, "invalid arguments")
+		reportCompletion(os.Stderr, jsonDiagnostics, err, 2)
+		return 2
 	}
 
-	emittedBlockCount, err := search.Run()
+	emittedBlockCount, err := search.RunContext(ctx)
 	if err != nil {
-		log.Fatalf(err, "search failed")
+		reportCompletion(os.Stderr, jsonDiagnostics, err, 1)
+		return 1
 	}
 
-	applyExitPolicy(args, emittedBlockCount)
-}
-
-func parseArguments() (Arguments, error) {
-	return parseArgumentsArgs(nil)
+	exitCode := 0
+	if emittedBlockCount > 0 {
+		exitCode = args.ValueExitCode
+		if args.ValueMessage != "" {
+			reportMatchMessage(os.Stderr, jsonDiagnostics, args.ValueMessage)
+		}
+	}
+	reportCompletion(os.Stderr, jsonDiagnostics, nil, exitCode)
+	return exitCode
 }
 
 func parseArgumentsArgs(argv []string) (Arguments, error) {
-	opts, err := docopt.ParseArgs(usage, argv, version)
+	parser := &docopt.Parser{HelpHandler: func(err error, text string) {
+		if err == nil {
+			fmt.Fprintln(os.Stdout, text)
+			os.Exit(0)
+		}
+	}}
+	opts, err := parser.ParseArgs(usage, argv, version)
 	if err != nil {
 		return Arguments{}, err
 	}
 
+	for _, option := range []string{"--overlap", "--diagnostics", "--stream", "--stream-persistent"} {
+		if value, present := opts[option].(string); present && value == "" {
+			return Arguments{}, fmt.Errorf("%s must not be empty", option)
+		}
+	}
 	var args Arguments
 	if err := opts.Bind(&args); err != nil {
 		return Arguments{}, err
@@ -115,34 +174,38 @@ func parseArgumentsArgs(argv []string) (Arguments, error) {
 }
 
 func buildSearch(args Arguments) (*Search, error) {
+	if err := validateSearchArguments(args); err != nil {
+		return nil, diagnosticError("argument", "", "", err)
+	}
 	if err := validateGlobPatterns(args.ValueIncludes); err != nil {
-		return nil, err
+		return nil, diagnosticError("argument", "", "", err)
 	}
 	if err := validateGlobPatterns(args.ValueExcludes); err != nil {
-		return nil, err
+		return nil, diagnosticError("argument", "", "", err)
 	}
 
 	query, err := compileQuery(args.ValueQuery, args.FlagLiteral)
 	if err != nil {
-		return nil, err
+		return nil, diagnosticError("query", "", args.ValueQuery, err)
 	}
 
 	filters, err := buildBlockFilters(args.ValueAwkIfs)
 	if err != nil {
-		return nil, err
+		return nil, diagnosticError("argument", "", "", err)
 	}
 
 	output, err := outputPolicyFromArgs(args)
 	if err != nil {
-		return nil, err
+		return nil, diagnosticError("argument", "", "", err)
 	}
 
 	return &Search{
-		query:   query,
-		filters: filters,
-		files:   resolveInputFiles(args.ValueFiles),
-		output:  output,
-		walker:  newFileWalkerForCLI(args.ValueIncludes, args.ValueExcludes),
+		parseOptions: ParseOptions{Matches: args.FlagMatches, Overlap: args.ValueOverlap, Limits: limitsFromArgs(args)},
+		query:        query,
+		filters:      filters,
+		files:        resolveInputFiles(args.ValueFiles),
+		output:       output,
+		walker:       newFileWalkerForCLI(args.ValueIncludes, args.ValueExcludes),
 	}, nil
 }
 
@@ -187,13 +250,16 @@ func outputPolicyFromArgs(args Arguments) (OutputPolicy, error) {
 	hashline := args.FlagHashline && showLineNumbers && !args.FlagShowFilenamePerLine
 
 	return OutputPolicy{
-		ShowFilename:  args.FlagShowFilenamePerLine,
-		ShowLine:      showLineNumbers,
-		UseColors:     useColors,
-		FilesOnly:     args.FlagFilesOnly,
-		JSON:          args.FlagJSON,
-		Hashline:      hashline,
-		StreamCommand: args.ValueStreamCommand,
+		ShowFilename:            args.FlagShowFilenamePerLine,
+		ShowLine:                showLineNumbers,
+		UseColors:               useColors,
+		FilesOnly:               args.FlagFilesOnly,
+		JSON:                    args.FlagJSON || args.FlagMatches,
+		Null:                    args.FlagNull,
+		PersistentStreamCommand: args.ValuePersistentStreamCommand,
+		OutputBytes:             args.ValueMaxOutputBytes,
+		Hashline:                hashline,
+		StreamCommand:           args.ValueStreamCommand,
 	}, nil
 }
 
@@ -230,16 +296,4 @@ func newFileWalkerForCLI(includes, excludes []string) *FileWalker {
 	}
 
 	return walker
-}
-
-func applyExitPolicy(args Arguments, emittedBlockCount int) {
-	if emittedBlockCount == 0 {
-		return
-	}
-
-	if args.ValueMessage != "" {
-		fmt.Fprintln(os.Stderr, args.ValueMessage)
-	}
-
-	os.Exit(args.ValueExitCode)
 }

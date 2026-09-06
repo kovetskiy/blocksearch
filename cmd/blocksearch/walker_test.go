@@ -107,16 +107,16 @@ func TestFileWalkerLoadsGitignoreFromSearchedDirectory(t *testing.T) {
 	root := t.TempDir()
 	proj := filepath.Join(root, "proj")
 	if err := os.Mkdir(proj, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v", err)
 	}
 	if err := os.WriteFile(filepath.Join(proj, ".gitignore"), []byte("ignored.go\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v", err)
 	}
 	if err := os.WriteFile(filepath.Join(proj, "ignored.go"), []byte("package main\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v", err)
 	}
 	if err := os.WriteFile(filepath.Join(proj, "kept.go"), []byte("package main\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v", err)
 	}
 
 	walker := NewFileWalker(root, nil, nil)
@@ -146,12 +146,12 @@ func TestEmptyHomeDoesNotLoadGlobalGitignoreFromCwd(t *testing.T) {
 	dir := t.TempDir()
 	// A .gitignore_global sitting in the directory the CLI would treat as ".".
 	if err := os.WriteFile(filepath.Join(dir, ".gitignore_global"), []byte("*.go\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v", err)
 	}
 	t.Setenv("HOME", "")
 	origWd, _ := os.Getwd()
 	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v", err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(origWd) })
 

@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/benhoyt/goawk/interp"
@@ -51,10 +53,26 @@ func NewBlockConditionMatcher(condition string) *BlockConditionMatcher {
 }
 
 func (matcher *BlockConditionMatcher) Match(block string) (bool, error) {
-	input := strings.NewReader(block)
-	output := bytes.NewBuffer(nil)
+	return matcher.MatchContext(context.Background(), block)
+}
 
-	err := interp.Exec(matcher.awkProgram, " ", input, output)
+func (matcher *BlockConditionMatcher) MatchContext(ctx context.Context, block string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	program, err := parser.ParseProgram([]byte(matcher.awkProgram), nil)
+	if err != nil {
+		return false, err
+	}
+	interpreter, err := interp.New(program)
+	if err != nil {
+		return false, err
+	}
+	output := bytes.NewBuffer(nil)
+	_, err = interpreter.ExecuteContext(ctx, &interp.Config{
+		Stdin: strings.NewReader(block), Output: output, Error: io.Discard,
+		Vars: []string{"FS", " "},
+	})
 	if err != nil {
 		return false, err
 	}
