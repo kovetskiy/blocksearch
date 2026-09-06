@@ -1,8 +1,8 @@
 # Machine interface
 
-This contract describes v7.0, following the v6.0 release tag. Earlier
-CLI builds reported a stale v1.5.0 string; historical probe references
-below retain that reported version.
+This contract describes v7.1, which adds strict UTF-8 source validation to
+the v7.0 machine interface. Earlier CLI builds reported a stale v1.5.0
+string; historical probe references below retain that reported version.
 
 Read this document when integrating a wrapper or changing CLI parsing,
 extraction, emission, or diagnostics. The docopt usage and this contract
@@ -38,6 +38,27 @@ The following combinations are rejected as argument errors:
 Streaming takes precedence over `--json`. `--matches` implies JSON and
 also enriches records sent to either streaming mode. Color and classic
 text-format flags do not turn JSON or streaming back into text.
+
+## Source encoding
+
+After the existing binary-content detection (which still skips binary files),
+text inputs must be valid UTF-8 throughout the file. Invalid UTF-8 is rejected
+before normalization, matching, or parsing, even if the query would not match.
+This applies to every output mode, including files-only and stream consumers.
+No blocks or filename records are emitted for the rejected file.
+
+An encoding failure is an ordinary `input` diagnostic identifying the path,
+with a message stating that the source contains invalid UTF-8. The search
+continues with other inputs and exits 1; JSON completion reports
+`success: false`, `results_partial: true`, and `exit_code: 1`. Existing file
+byte limits are checked before encoding validation.
+
+v7.1 intentionally replaces lossy JSON behavior in v7.0: block text now
+round-trips the normalized source bytes for its exported lines. Genuine
+U+FFFD replacement characters are valid input and are preserved, counting as
+three bytes in match offsets and columns. No decoded-text coordinate system
+or lossy-text flag is needed. Filename encoding remains a separate contract
+(see NUL-delimited files output above).
 
 ## Exact matches
 

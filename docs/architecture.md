@@ -34,6 +34,12 @@ then is promoted to the construct it belongs to, in three stages:
   that phantom line. The column-0 decrement in `parse.go` MUST remain;
   it is not an off-by-one bug.
 
+Text candidates are validated as UTF-8 before normalization and matching,
+through the common parsing entry point for grammar and indentation paths.
+Invalid encoding is an ordinary input failure, not a lossy decoding step;
+JSON block text and native byte coordinates must share the same bytes.
+The file reader still skips detected binary content before this validation.
+
 ## Parse policy
 
 `ParseOptions` MUST carry metadata, overlap, and resource-limit policy

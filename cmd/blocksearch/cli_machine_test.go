@@ -213,3 +213,55 @@ func TestMachineCLIVersionAndHelp(t *testing.T) {
 		t.Fatalf("help: exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }
+
+func TestMachineCLIInvalidUTF8Input(t *testing.T) {
+	bad := writeBlockFixture(t, "bad.txt", []byte(strings.Repeat("\xff", 4999)+"TARGET\n"))
+	good := writeBlockFixture(t, "good.txt", []byte("� TARGET\n"))
+	for _, flags := range [][]string{
+		{}, {"--json"}, {"--matches"}, {"--matches", "--literal"},
+		{"--files"}, {"--files", "--null"}, {"--files", "--json"},
+		{"--matches", "--stream", "cat"}, {"--matches", "--stream-persistent", "cat"},
+	} {
+		t.Run(strings.Join(flags, " "), func(t *testing.T) {
+			args := append([]string{"--diagnostics=json"}, flags...)
+			stdout, stderr, code := runMachineCLI(t, append(args, "TARGET", bad)...)
+			if code != 1 || stdout != "" {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+			records := machineRecords(t, stderr)
+			if len(records) != 2 || records[0]["kind"] != "input" || records[0]["path"] != bad || !strings.Contains(records[0]["message"].(string), "invalid UTF-8") {
+				t.Fatalf("diagnostics = %#v", records)
+			}
+			completion := records[1]
+			if completion["type"] != "completion" || completion["success"] != false || completion["results_partial"] != true || completion["exit_code"] != float64(1) {
+				t.Fatalf("completion = %#v", completion)
+			}
+		})
+	}
+	stdout, stderr, code := runMachineCLI(t, "--matches", "--diagnostics=json", "TARGET", bad, good)
+	if code != 1 {
+		t.Fatalf("mixed inputs: exit=%d stderr=%q", code, stderr)
+	}
+	records := machineRecords(t, stdout)
+	if len(records) != 1 || records[0]["filename"] != good || records[0]["text"] != "� TARGET" {
+		t.Fatalf("mixed input records = %#v", records)
+	}
+	want := []Match{{ByteStart: 4, ByteEnd: 10, LineStart: 1, LineEnd: 1, ColumnStart: 5, ColumnEnd: 11}}
+	var record struct {
+		Matches []Match `json:"matches"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &record); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(record.Matches) != 1 || record.Matches[0] != want[0] {
+		t.Fatalf("replacement character coordinates = %+v, want %+v", record.Matches, want)
+	}
+	diagnostics := machineRecords(t, stderr)
+	if len(diagnostics) != 2 || diagnostics[0]["kind"] != "input" || diagnostics[0]["path"] != bad || diagnostics[1]["success"] != false || diagnostics[1]["results_partial"] != true || diagnostics[1]["exit_code"] != float64(1) {
+		t.Fatalf("mixed input diagnostics = %#v", diagnostics)
+	}
+	stdout, stderr, code = runMachineCLI(t, "--matches", "TARGET", bad)
+	if code != 1 || stdout != "" || !strings.Contains(stderr, bad) || !strings.Contains(stderr, "invalid UTF-8") {
+		t.Fatalf("text diagnostic: exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	sitter "github.com/smacker/go-tree-sitter"
 )
@@ -80,6 +81,9 @@ func parseBlocksWithOptions(ctx context.Context, contents []byte, language *sitt
 	}
 	if maximum := options.Limits.FileBytes; maximum > 0 && int64(len(contents)) > maximum {
 		return nil, &LimitError{Resource: "file_bytes", Maximum: maximum}
+	}
+	if !utf8.Valid(contents) {
+		return nil, fmt.Errorf("source contains invalid UTF-8")
 	}
 	normalized := hashlineNormalizeFileBytes(contents)
 	matchLimit := -1

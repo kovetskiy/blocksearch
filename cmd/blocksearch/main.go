@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	version = "v7.0"
+	version = "v7.1"
 	usage   = "blocksearch " + version + `
 
 Usage:
@@ -58,6 +58,8 @@ Each <file> may be an existing file, an existing directory (searched
 recursively), or a glob (e.g. *.go, src/**/*.go, {a,b}.py). With no
 <file>, blocksearch searches . when stdin is a terminal and /dev/stdin
 otherwise. A glob that matches nothing is an error.
+Text inputs must be valid UTF-8; invalid encoding is an input error in every
+output mode, even without a match. Detected binary files are still skipped.
 
 --files cannot be combined with streaming or --matches; --null requires
 --files. The stream modes are mutually exclusive and take precedence over
